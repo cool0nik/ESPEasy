@@ -73,7 +73,7 @@ void deepSleep(int delay)
       return;
     }
   }
-
+  saveUserVarToRTC();
   deepSleepStart(delay); // Call deepSleepStart function after these checks
 }
 
@@ -100,7 +100,7 @@ void deepSleepStart(int delay)
   #endif
 }
 
-boolean remoteConfig(struct EventStruct *event, String& string)
+boolean remoteConfig(struct EventStruct *event, const String& string)
 {
   checkRAM(F("remoteConfig"));
   boolean success = false;
@@ -111,11 +111,10 @@ boolean remoteConfig(struct EventStruct *event, String& string)
     success = true;
     if (parseString(string, 2) == F("task"))
     {
-      int configCommandPos1 = getParamStartPos(string, 3);
-      int configCommandPos2 = getParamStartPos(string, 4);
-
-      String configTaskName = string.substring(configCommandPos1, configCommandPos2 - 1);
-      String configCommand = string.substring(configCommandPos2);
+      String configTaskName = parseStringKeepCase(string, 3);
+      String configCommand = parseStringToEndKeepCase(string, 4);
+      if (configTaskName.length() == 0 || configCommand.length() == 0)
+        return success; // TD-er: Should this be return false?
 
       int8_t index = getTaskIndexByName(configTaskName);
       if (index != -1)
@@ -134,8 +133,8 @@ int8_t getTaskIndexByName(String TaskNameSearch)
   for (byte x = 0; x < TASKS_MAX; x++)
   {
     LoadTaskSettings(x);
-    String TaskName = ExtraTaskSettings.TaskDeviceName;
-    if ((ExtraTaskSettings.TaskDeviceName[0] != 0 ) && (TaskNameSearch.equalsIgnoreCase(TaskName)))
+    String TaskName = getTaskDeviceName(x);
+    if ((TaskName.length() != 0 ) && (TaskNameSearch.equalsIgnoreCase(TaskName)))
     {
       return x;
     }
@@ -143,30 +142,6 @@ int8_t getTaskIndexByName(String TaskNameSearch)
   return -1;
 }
 
-
-void flashCount()
-{
-  if (RTC.flashDayCounter <= MAX_FLASHWRITES_PER_DAY)
-    RTC.flashDayCounter++;
-  RTC.flashCounter++;
-  saveToRTC();
-}
-
-String flashGuard()
-{
-  checkRAM(F("flashGuard"));
-  if (RTC.flashDayCounter > MAX_FLASHWRITES_PER_DAY)
-  {
-    String log = F("FS   : Daily flash write rate exceeded! (powercycle to reset this)");
-    addLog(LOG_LEVEL_ERROR, log);
-    return log;
-  }
-  flashCount();
-  return(String());
-}
-
-//use this in function that can return an error string. it automaticly returns with an error string if there where too many flash writes.
-#define FLASH_GUARD() { String flashErr=flashGuard(); if (flashErr.length()) return(flashErr); }
 
 
 /*********************************************************************************************\
@@ -378,12 +353,12 @@ void delayBackground(unsigned long delay)
 void parseCommandString(struct EventStruct *event, const String& string)
 {
   checkRAM(F("parseCommandString"));
-  char command[80];
+  char command[INPUT_COMMAND_SIZE];
   command[0] = 0;
-  char TmpStr1[80];
+  char TmpStr1[INPUT_COMMAND_SIZE];
   TmpStr1[0] = 0;
 
-  string.toCharArray(command, 80);
+  string.toCharArray(command, INPUT_COMMAND_SIZE);
   event->Par1 = 0;
   event->Par2 = 0;
   event->Par3 = 0;
@@ -403,142 +378,48 @@ void parseCommandString(struct EventStruct *event, const String& string)
 void taskClear(byte taskIndex, boolean save)
 {
   checkRAM(F("taskClear"));
-  Settings.TaskDeviceNumber[taskIndex] = 0;
-  ExtraTaskSettings.TaskDeviceName[0] = 0;
-  Settings.TaskDeviceDataFeed[taskIndex] = 0;
-  Settings.TaskDevicePin1[taskIndex] = -1;
-  Settings.TaskDevicePin2[taskIndex] = -1;
-  Settings.TaskDevicePin3[taskIndex] = -1;
-  Settings.TaskDevicePort[taskIndex] = 0;
-  Settings.TaskDeviceGlobalSync[taskIndex] = false;
-  Settings.TaskDeviceTimer[taskIndex] = 0;
-  Settings.TaskDeviceEnabled[taskIndex] = false;
-
-  for (byte controllerNr = 0; controllerNr < CONTROLLER_MAX; controllerNr++)
-  {
-    Settings.TaskDeviceID[controllerNr][taskIndex] = 0;
-    Settings.TaskDeviceSendData[controllerNr][taskIndex] = true;
-  }
-
-  for (byte x = 0; x < PLUGIN_CONFIGVAR_MAX; x++)
-    Settings.TaskDevicePluginConfig[taskIndex][x] = 0;
-
-  for (byte varNr = 0; varNr < VARS_PER_TASK; varNr++)
-  {
-    ExtraTaskSettings.TaskDeviceFormula[varNr][0] = 0;
-    ExtraTaskSettings.TaskDeviceValueNames[varNr][0] = 0;
-    ExtraTaskSettings.TaskDeviceValueDecimals[varNr] = 2;
-  }
-
-  for (byte varNr = 0; varNr < PLUGIN_EXTRACONFIGVAR_MAX; varNr++)
-  {
-    ExtraTaskSettings.TaskDevicePluginConfigLong[varNr] = 0;
-    ExtraTaskSettings.TaskDevicePluginConfig[varNr] = 0;
-  }
-
-  if (save)
-  {
+  Settings.clearTask(taskIndex);
+  ExtraTaskSettings.clear(); // Invalidate any cached values.
+  ExtraTaskSettings.TaskIndex = taskIndex;
+  if (save) {
     SaveTaskSettings(taskIndex);
     SaveSettings();
   }
 }
 
-/********************************************************************************************\
-  SPIFFS error handling
-  Look here for error # reference: https://github.com/pellepl/spiffs/blob/master/src/spiffs.h
-  \*********************************************************************************************/
-#define SPIFFS_CHECK(result, fname) if (!(result)) { return(FileError(__LINE__, fname)); }
-String FileError(int line, const char * fname)
-{
-   String err = F("FS   : Error while reading/writing ");
-   err += fname;
-   err += F(" in ");
-   err += line;
-   addLog(LOG_LEVEL_ERROR, err);
-   return(err);
-}
-
-
-/********************************************************************************************\
-  Fix stuff to clear out differences between releases
-  \*********************************************************************************************/
-String BuildFixes()
-{
-  checkRAM(F("BuildFixes"));
-  Serial.println(F("\nBuild changed!"));
-
-  if (Settings.Build < 145)
-  {
-    String fname=F(FILE_NOTIFICATION);
-    fs::File f = SPIFFS.open(fname, "w");
-    SPIFFS_CHECK(f, fname.c_str());
-
-    if (f)
-    {
-      for (int x = 0; x < 4096; x++)
-      {
-        SPIFFS_CHECK(f.write(0), fname.c_str());
+String checkTaskSettings(byte taskIndex) {
+  String err = LoadTaskSettings(taskIndex);
+  if (err.length() > 0) return err;
+  if (!ExtraTaskSettings.checkUniqueValueNames()) {
+    return F("Use unique value names");
+  }
+  if (!ExtraTaskSettings.checkInvalidCharInNames()) {
+    return F("Invalid character in names. Do not use ',#[]' or space.");
+  }
+  String deviceName = ExtraTaskSettings.TaskDeviceName;
+  if (deviceName.length() == 0) {
+    if (Settings.TaskDeviceEnabled[taskIndex]) {
+      // Decide what to do here, for now give a warning when task is enabled.
+      return F("Warning: Task Device Name is empty. It is adviced to give tasks an unique name");
+    }
+  }
+  for (int i = 0; i < TASKS_MAX; ++i) {
+    if (i != taskIndex) {
+      LoadTaskSettings(i);
+      if (ExtraTaskSettings.TaskDeviceName[0] != 0) {
+        if (strcasecmp(ExtraTaskSettings.TaskDeviceName, deviceName.c_str()) == 0) {
+          err = F("Task Device Name is not unique, conflicts with task ID #");
+          err += (i+1);
+          return err;
+        }
       }
-      f.close();
     }
   }
 
-  if (Settings.Build < 20101)
-  {
-    Serial.println(F("Fix reset Pin"));
-    Settings.Pin_Reset = -1;
-  }
-  if (Settings.Build < 20102) {
-    // Settings were 'mangled' by using older version
-    // Have to patch settings to make sure no bogus data is being used.
-    Serial.println(F("Fix settings with uninitalized data or corrupted by switching between versions"));
-    Settings.UseRTOSMultitasking = false;
-    Settings.Pin_Reset = -1;
-    Settings.SyslogFacility = DEFAULT_SYSLOG_FACILITY;
-    Settings.MQTTUseUnitNameAsClientId = DEFAULT_MQTT_USE_UNITNANE_AS_CLIENTID;
-    Settings.StructSize = sizeof(Settings);
-  }
-
-  Settings.Build = BUILD;
-  return(SaveSettings());
+  err = LoadTaskSettings(taskIndex);
+  return err;
 }
 
-
-/********************************************************************************************\
-  Mount FS and check config.dat
-  \*********************************************************************************************/
-void fileSystemCheck()
-{
-  checkRAM(F("fileSystemCheck"));
-  addLog(LOG_LEVEL_INFO, F("FS   : Mounting..."));
-  if (SPIFFS.begin())
-  {
-    #if defined(ESP8266)
-      fs::FSInfo fs_info;
-      SPIFFS.info(fs_info);
-
-      String log = F("FS   : Mount successful, used ");
-      log=log+fs_info.usedBytes;
-      log=log+F(" bytes of ");
-      log=log+fs_info.totalBytes;
-      addLog(LOG_LEVEL_INFO, log);
-    #endif
-
-    fs::File f = SPIFFS.open(FILE_CONFIG, "r");
-    if (!f)
-    {
-      ResetFactory();
-    }
-    f.close();
-  }
-  else
-  {
-    String log = F("FS   : Mount failed");
-    Serial.println(log);
-    addLog(LOG_LEVEL_ERROR, log);
-    ResetFactory();
-  }
-}
 
 
 /********************************************************************************************\
@@ -593,11 +474,16 @@ byte getNotificationProtocolIndex(byte Number)
 /********************************************************************************************\
   Find positional parameter in a char string
   \*********************************************************************************************/
-boolean GetArgv(const char *string, char *argv, unsigned int argc)
+boolean GetArgv(const char *string, char *argv, unsigned int argc) {
+  return GetArgv(string, argv, INPUT_COMMAND_SIZE, argc);
+}
+
+boolean GetArgv(const char *string, char *argv, unsigned int argv_size, unsigned int argc)
 {
   unsigned int string_pos = 0, argv_pos = 0, argc_pos = 0;
   char c, d;
   boolean parenthesis = false;
+  char matching_parenthesis = '"';
 
   while (string_pos < strlen(string))
   {
@@ -609,17 +495,32 @@ boolean GetArgv(const char *string, char *argv, unsigned int argc)
     else if  (!parenthesis && c == ',' && d == ' ') {}
     else if  (!parenthesis && c == ' ' && d >= 33 && d <= 126) {}
     else if  (!parenthesis && c == ',' && d >= 33 && d <= 126) {}
-    else if  (c == '"' || c == '[') {
+    else if  (c == '"' || c == '\'' || c == '[') {
       parenthesis = true;
+      matching_parenthesis = c;
+      if (c == '[')
+        matching_parenthesis = ']';
     }
     else
     {
+      if ((argv_pos +2 ) >= argv_size) {
+        if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
+          String log = F("GetArgv Error; argv_size exceeded. argc=");
+          log += argc;
+          log += F(" argv_size=");
+          log += argv_size;
+          log += F(" argv=");
+          log += argv;
+          addLog(LOG_LEVEL_ERROR, log);
+        }
+        return false;
+      }
       argv[argv_pos++] = c;
       argv[argv_pos] = 0;
 
-      if ((!parenthesis && (d == ' ' || d == ',' || d == 0)) || (parenthesis && (d == '"' || d == ']'))) // end of word
+      if ((!parenthesis && (d == ' ' || d == ',' || d == 0)) || (parenthesis && (d == matching_parenthesis))) // end of word
       {
-        if (d == '"' || d == ']')
+        if (d == matching_parenthesis)
           parenthesis = false;
         argv[argv_pos] = 0;
         argc_pos++;
@@ -702,388 +603,12 @@ uint32_t progMemMD5check(){
    return 0;
 }
 
-
-
 /********************************************************************************************\
-  Save settings to SPIFFS
+  Handler for keeping ExtraTaskSettings up to date using cache
   \*********************************************************************************************/
-String SaveSettings(void)
-{
-  checkRAM(F("SaveSettings"));
-  MD5Builder md5;
-  uint8_t tmp_md5[16] = {0};
-  String err;
-
-  Settings.StructSize = sizeof(struct SettingsStruct);
-
-  // FIXME @TD-er: As discussed in #1292, the CRC for the settings is now disabled.
-/*
-  memcpy( Settings.ProgmemMd5, CRCValues.runTimeMD5, 16);
-  md5.begin();
-  md5.add((uint8_t *)&Settings, sizeof(Settings)-16);
-  md5.calculate();
-  md5.getBytes(tmp_md5);
-  if (memcmp(tmp_md5, Settings.md5, 16) != 0) {
-    // Settings have changed, save to file.
-    memcpy(Settings.md5, tmp_md5, 16);
-*/
-    err=SaveToFile((char*)FILE_CONFIG, 0, (byte*)&Settings, sizeof(Settings));
-    if (err.length())
-     return(err);
-//  }
-
-  memcpy( SecuritySettings.ProgmemMd5, CRCValues.runTimeMD5, 16);
-  md5.begin();
-  md5.add((uint8_t *)&SecuritySettings, sizeof(SecuritySettings)-16);
-  md5.calculate();
-  md5.getBytes(tmp_md5);
-  if (memcmp(tmp_md5, SecuritySettings.md5, 16) != 0) {
-    // Settings have changed, save to file.
-    memcpy(SecuritySettings.md5, tmp_md5, 16);
-    err=SaveToFile((char*)FILE_SECURITY, 0, (byte*)&SecuritySettings, sizeof(SecuritySettings));
-    if (WifiIsAP(WiFi.getMode())) {
-      // Security settings are saved, may be update of WiFi settings or hostname.
-      wifiSetupConnect = true;
-    }
-  }
-  return (err);
-}
-
-/********************************************************************************************\
-  Load settings from SPIFFS
-  \*********************************************************************************************/
-String LoadSettings()
-{
-  checkRAM(F("LoadSettings"));
-  String err;
-  uint8_t calculatedMd5[16];
-  MD5Builder md5;
-
-  err=LoadFromFile((char*)FILE_CONFIG, 0, (byte*)&Settings, sizeof( SettingsStruct));
-  if (err.length())
-    return(err);
-
-    // FIXME @TD-er: As discussed in #1292, the CRC for the settings is now disabled.
-/*
-  if (Settings.StructSize > 16) {
-    md5.begin();
-    md5.add((uint8_t *)&Settings, Settings.StructSize -16);
-    md5.calculate();
-    md5.getBytes(calculatedMd5);
-  }
-  if (memcmp (calculatedMd5, Settings.md5,16)==0){
-    addLog(LOG_LEVEL_INFO,  F("CRC  : Settings CRC           ...OK"));
-    if (memcmp(Settings.ProgmemMd5, CRCValues.runTimeMD5, 16)!=0)
-      addLog(LOG_LEVEL_INFO, F("CRC  : binary has changed since last save of Settings"));
-  }
-  else{
-    addLog(LOG_LEVEL_ERROR, F("CRC  : Settings CRC           ...FAIL"));
-  }
-*/
-
-  err=LoadFromFile((char*)FILE_SECURITY, 0, (byte*)&SecuritySettings, sizeof( SecurityStruct));
-  md5.begin();
-  md5.add((uint8_t *)&SecuritySettings, sizeof(SecuritySettings)-16);
-  md5.calculate();
-  md5.getBytes(calculatedMd5);
-  if (memcmp (calculatedMd5, SecuritySettings.md5, 16)==0){
-    addLog(LOG_LEVEL_INFO, F("CRC  : SecuritySettings CRC   ...OK "));
-    if (memcmp(SecuritySettings.ProgmemMd5,CRCValues.runTimeMD5, 16)!=0)
-      addLog(LOG_LEVEL_INFO, F("CRC  : binary has changed since last save of Settings"));
- }
-  else{
-    addLog(LOG_LEVEL_ERROR, F("CRC  : SecuritySettings CRC   ...FAIL"));
-  }
-  setUseStaticIP(useStaticIP());
-  return(err);
-}
-
-
-/********************************************************************************************\
-  Save Task settings to SPIFFS
-  \*********************************************************************************************/
-String SaveTaskSettings(byte TaskIndex)
-{
-  checkRAM(F("SaveTaskSettings"));
-  if (DAT_TASKS_SIZE < sizeof(struct ExtraTaskSettingsStruct))
-    return F("SaveTaskSettings too big");
-  if (TaskIndex >= TASKS_MAX)
-    return F("SaveTaskSettings TaskIndex too big");
-
-  ExtraTaskSettings.TaskIndex = TaskIndex;
-  return(SaveToFile((char*)FILE_CONFIG, DAT_OFFSET_TASKS + (TaskIndex * DAT_TASKS_SIZE), (byte*)&ExtraTaskSettings, sizeof(struct ExtraTaskSettingsStruct)));
-}
-
-
-/********************************************************************************************\
-  Load Task settings from SPIFFS
-  \*********************************************************************************************/
-String LoadTaskSettings(byte TaskIndex)
-{
-  checkRAM(F("LoadTaskSettings"));
-  //already loaded
-  if (ExtraTaskSettings.TaskIndex == TaskIndex)
-    return(String());
-  if (TaskIndex >= TASKS_MAX)
-    return F("LoadTaskSettings TaskIndex too big");
-
-  String result = "";
-  result = LoadFromFile((char*)FILE_CONFIG, DAT_OFFSET_TASKS + (TaskIndex * DAT_TASKS_SIZE), (byte*)&ExtraTaskSettings, sizeof(struct ExtraTaskSettingsStruct));
-  ExtraTaskSettings.TaskIndex = TaskIndex; // Needed when an empty task was requested
-  return result;
-}
-
-
-/********************************************************************************************\
-  Save Custom Task settings to SPIFFS
-  \*********************************************************************************************/
-String SaveCustomTaskSettings(int TaskIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("SaveCustomTaskSettings"));
-  if (datasize > DAT_TASKS_SIZE)
-    return F("SaveCustomTaskSettings too big");
-  if (TaskIndex >= TASKS_MAX)
-    return F("SaveCustomTaskSettings TaskIndex too big");
-
-  return(SaveToFile((char*)FILE_CONFIG, DAT_OFFSET_TASKS + (TaskIndex * DAT_TASKS_SIZE) + DAT_TASKS_CUSTOM_OFFSET, memAddress, datasize));
-}
-
-
-/********************************************************************************************\
-  Clear custom task settings
-  \*********************************************************************************************/
-String ClearCustomTaskSettings(int TaskIndex)
-{
-  // addLog(LOG_LEVEL_DEBUG, F("Clearing custom task settings"));
-  if (TaskIndex >= TASKS_MAX)
-    return F("ClearCustomTaskSettings TaskIndex too big");
-  return(ClearInFile((char*)FILE_CONFIG, DAT_OFFSET_TASKS + (TaskIndex * DAT_TASKS_SIZE) + DAT_TASKS_CUSTOM_OFFSET, DAT_TASKS_CUSTOM_SIZE));
-}
-
-/********************************************************************************************\
-  Load Custom Task settings to SPIFFS
-  \*********************************************************************************************/
-String LoadCustomTaskSettings(int TaskIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("LoadCustomTaskSettings"));
-  if (datasize > DAT_TASKS_SIZE)
-    return (String(F("LoadCustomTaskSettings too big")));
-  if (TaskIndex >= TASKS_MAX)
-    return F("LoadCustomTaskSettings TaskIndex too big");
-
-  return(LoadFromFile((char*)FILE_CONFIG, DAT_OFFSET_TASKS + (TaskIndex * DAT_TASKS_SIZE) + DAT_TASKS_CUSTOM_OFFSET, memAddress, datasize));
-}
-
-/********************************************************************************************\
-  Save Controller settings to SPIFFS
-  \*********************************************************************************************/
-String SaveControllerSettings(int ControllerIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("SaveControllerSettings"));
-  if (datasize > DAT_CONTROLLER_SIZE)
-    return F("SaveControllerSettings too big");
-  return SaveToFile((char*)FILE_CONFIG, DAT_OFFSET_CONTROLLER + (ControllerIndex * DAT_CONTROLLER_SIZE), memAddress, datasize);
-}
-
-
-/********************************************************************************************\
-  Load Controller settings to SPIFFS
-  \*********************************************************************************************/
-String LoadControllerSettings(int ControllerIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("LoadControllerSettings"));
-  if (datasize > DAT_CONTROLLER_SIZE)
-    return F("LoadControllerSettings too big");
-
-  return(LoadFromFile((char*)FILE_CONFIG, DAT_OFFSET_CONTROLLER + (ControllerIndex * DAT_CONTROLLER_SIZE), memAddress, datasize));
-}
-
-
-/********************************************************************************************\
-  Clear Custom Controller settings
-  \*********************************************************************************************/
-String ClearCustomControllerSettings(int ControllerIndex)
-{
-  checkRAM(F("ClearCustomControllerSettings"));
-  // addLog(LOG_LEVEL_DEBUG, F("Clearing custom controller settings"));
-  return(ClearInFile((char*)FILE_CONFIG, DAT_OFFSET_CUSTOM_CONTROLLER + (ControllerIndex * DAT_CUSTOM_CONTROLLER_SIZE), DAT_CUSTOM_CONTROLLER_SIZE));
-}
-
-
-/********************************************************************************************\
-  Save Custom Controller settings to SPIFFS
-  \*********************************************************************************************/
-String SaveCustomControllerSettings(int ControllerIndex,byte* memAddress, int datasize)
-{
-  checkRAM(F("SaveCustomControllerSettings"));
-  if (datasize > DAT_CUSTOM_CONTROLLER_SIZE)
-    return F("SaveCustomControllerSettings too big");
-  return SaveToFile((char*)FILE_CONFIG, DAT_OFFSET_CUSTOM_CONTROLLER + (ControllerIndex * DAT_CUSTOM_CONTROLLER_SIZE), memAddress, datasize);
-}
-
-
-/********************************************************************************************\
-  Load Custom Controller settings to SPIFFS
-  \*********************************************************************************************/
-String LoadCustomControllerSettings(int ControllerIndex,byte* memAddress, int datasize)
-{
-  checkRAM(F("LoadCustomControllerSettings"));
-  if (datasize > DAT_CUSTOM_CONTROLLER_SIZE)
-    return(F("LoadCustomControllerSettings too big"));
-  return(LoadFromFile((char*)FILE_CONFIG, DAT_OFFSET_CUSTOM_CONTROLLER + (ControllerIndex * DAT_CUSTOM_CONTROLLER_SIZE), memAddress, datasize));
-}
-
-/********************************************************************************************\
-  Save Controller settings to SPIFFS
-  \*********************************************************************************************/
-String SaveNotificationSettings(int NotificationIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("SaveNotificationSettings"));
-  if (datasize > DAT_NOTIFICATION_SIZE)
-    return F("SaveNotificationSettings too big");
-  return SaveToFile((char*)FILE_NOTIFICATION, NotificationIndex * DAT_NOTIFICATION_SIZE, memAddress, datasize);
-}
-
-
-/********************************************************************************************\
-  Load Controller settings to SPIFFS
-  \*********************************************************************************************/
-String LoadNotificationSettings(int NotificationIndex, byte* memAddress, int datasize)
-{
-  checkRAM(F("LoadNotificationSettings"));
-  if (datasize > DAT_NOTIFICATION_SIZE)
-    return(F("LoadNotificationSettings too big"));
-  return(LoadFromFile((char*)FILE_NOTIFICATION, NotificationIndex * DAT_NOTIFICATION_SIZE, memAddress, datasize));
-}
-
-
-
-
-/********************************************************************************************\
-  Init a file with zeros on SPIFFS
-  \*********************************************************************************************/
-String InitFile(const char* fname, int datasize)
-{
-  checkRAM(F("InitFile"));
-  FLASH_GUARD();
-
-  fs::File f = SPIFFS.open(fname, "w");
-  SPIFFS_CHECK(f, fname);
-
-  for (int x = 0; x < datasize ; x++)
-  {
-    SPIFFS_CHECK(f.write(0), fname);
-  }
-  f.close();
-
-  //OK
-  return String();
-}
-
-/********************************************************************************************\
-  Save data into config file on SPIFFS
-  \*********************************************************************************************/
-String SaveToFile(char* fname, int index, byte* memAddress, int datasize)
-{
-  checkRAM(F("SaveToFile"));
-  FLASH_GUARD();
-  String log = F("SaveToFile: ");
-  log += fname;
-  log += F(" index: ");
-  log += index;
-  log += F(" datasize: ");
-  log += datasize;
-  addLog(LOG_LEVEL_DEBUG, log);
-
-  fs::File f = SPIFFS.open(fname, "r+");
-  SPIFFS_CHECK(f, fname);
-
-  SPIFFS_CHECK(f.seek(index, fs::SeekSet), fname);
-  byte *pointerToByteToSave = memAddress;
-  for (int x = 0; x < datasize ; x++)
-  {
-    SPIFFS_CHECK(f.write(*pointerToByteToSave), fname);
-    pointerToByteToSave++;
-  }
-  f.close();
-  log = F("FILE : Saved ");
-  log=log+fname;
-  addLog(LOG_LEVEL_INFO, log);
-
-  //OK
-  return String();
-}
-
-/********************************************************************************************\
-  Clear a certain area in a file (set to 0)
-  \*********************************************************************************************/
-String ClearInFile(char* fname, int index, int datasize)
-{
-  checkRAM(F("ClearInFile"));
-  FLASH_GUARD();
-
-  String log = F("ClearInFile: ");
-  log += fname;
-  log += F(" index: ");
-  log += index;
-  log += F(" datasize: ");
-  log += datasize;
-  addLog(LOG_LEVEL_DEBUG, log);
-
-
-  fs::File f = SPIFFS.open(fname, "r+");
-  SPIFFS_CHECK(f, fname);
-
-  SPIFFS_CHECK(f.seek(index, fs::SeekSet), fname);
-  for (int x = 0; x < datasize ; x++)
-  {
-    SPIFFS_CHECK(f.write(0), fname);
-  }
-  f.close();
-
-  //OK
-  return String();
-
-}
-
-/********************************************************************************************\
-  Load data from config file on SPIFFS
-  \*********************************************************************************************/
-String LoadFromFile(char* fname, int index, byte* memAddress, int datasize)
-{
-  checkRAM(F("LoadFromFile"));
-  String log = F("LoadFromFile: ");
-  log += fname;
-  log += F(" index: ");
-  log += index;
-  log += F(" datasize: ");
-  log += datasize;
-  addLog(LOG_LEVEL_DEBUG, log);
-
-  fs::File f = SPIFFS.open(fname, "r+");
-  SPIFFS_CHECK(f, fname);
-  SPIFFS_CHECK(f.seek(index, fs::SeekSet), fname);
-  SPIFFS_CHECK(f.read(memAddress,datasize), fname);
-  f.close();
-
-  return(String());
-}
-
-
-/********************************************************************************************\
-  Check SPIFFS area settings
-  \*********************************************************************************************/
-int SpiffsSectors()
-{
-  checkRAM(F("SpiffsSectors"));
-  #if defined(ESP8266)
-    uint32_t _sectorStart = ((uint32_t)&_SPIFFS_start - 0x40200000) / SPI_FLASH_SEC_SIZE;
-    uint32_t _sectorEnd = ((uint32_t)&_SPIFFS_end - 0x40200000) / SPI_FLASH_SEC_SIZE;
-    return _sectorEnd - _sectorStart;
-  #endif
-  #if defined(ESP32)
-    return 32;
-  #endif
+String getTaskDeviceName(byte TaskIndex) {
+  LoadTaskSettings(TaskIndex);
+  return ExtraTaskSettings.TaskDeviceName;
 }
 
 
@@ -1144,7 +669,7 @@ void ResetFactory(void)
   fname=FILE_RULES;
   InitFile(fname.c_str(), 0);
 
-  LoadSettings();
+  Settings.clearAll();
   // now we set all parameters that need to be non-zero as default value
 
 #if DEFAULT_USE_STATIC_IP
@@ -1205,11 +730,11 @@ void ResetFactory(void)
 
 	str2ip((char*)DEFAULT_SYSLOG_IP, Settings.Syslog_IP);
 
-	Settings.SyslogLevel	= DEFAULT_SYSLOG_LEVEL;
-	Settings.SerialLogLevel	= DEFAULT_SERIAL_LOG_LEVEL;
-	Settings.SyslogFacility	= DEFAULT_SYSLOG_FACILITY;
-	Settings.WebLogLevel	= DEFAULT_WEB_LOG_LEVEL;
-	Settings.SDLogLevel		= DEFAULT_SD_LOG_LEVEL;
+  setLogLevelFor(LOG_TO_SYSLOG, DEFAULT_SYSLOG_LEVEL);
+  setLogLevelFor(LOG_TO_SERIAL, DEFAULT_SERIAL_LOG_LEVEL);
+	setLogLevelFor(LOG_TO_WEBLOG, DEFAULT_WEB_LOG_LEVEL);
+  setLogLevelFor(LOG_TO_SDCARD, DEFAULT_SD_LOG_LEVEL);
+  Settings.SyslogFacility	= DEFAULT_SYSLOG_FACILITY;
 	Settings.UseValueLogger = DEFAULT_USE_SD_LOG;
 
 	Settings.UseSerial		= DEFAULT_USE_SERIAL;
@@ -1253,12 +778,7 @@ void ResetFactory(void)
   intent_to_reboot = true;
   WifiDisconnect(); // this will store empty ssid/wpa into sdk storage
   WiFi.persistent(false); // Do not use SDK storage of SSID/WPA parameters
-  #if defined(ESP8266)
-    ESP.reset();
-  #endif
-  #if defined(ESP32)
-    ESP.restart();
-  #endif
+  reboot();
 }
 
 
@@ -1358,6 +878,14 @@ String getResetReasonString() {
   #endif
 }
 
+uint32_t getFlashRealSizeInBytes() {
+  #if defined(ESP32)
+    return ESP.getFlashChipSize();
+  #else
+    return ESP.getFlashChipRealSize(); //ESP.getFlashChipSize();
+  #endif
+}
+
 String getSystemBuildString() {
   String result;
   result += BUILD;
@@ -1414,6 +942,9 @@ String getLWIPversion() {
 }
 #endif
 
+
+
+
 /********************************************************************************************\
   Check if string is valid float
   \*********************************************************************************************/
@@ -1434,19 +965,63 @@ boolean isInt(const String& tBuf) {
   return isNumerical(tBuf, true);
 }
 
-boolean isNumerical(const String& tBuf, bool mustBeInteger) {
+bool validIntFromString(const String& tBuf, int& result) {
+  const String numerical = getNumerical(tBuf, true);
+  const bool isvalid = isInt(numerical);
+  result = numerical.toInt();
+  return isvalid;
+}
+
+bool validFloatFromString(const String& tBuf, float& result) {
+  const String numerical = getNumerical(tBuf, false);
+  const bool isvalid = isFloat(numerical);
+  result = numerical.toFloat();
+  return isvalid;
+}
+
+
+String getNumerical(const String& tBuf, bool mustBeInteger) {
+  String result = "";
+  const unsigned int bufLength = tBuf.length();
+  if (bufLength == 0) return result;
   boolean decPt = false;
   int firstDec = 0;
-  if(tBuf.charAt(0) == '+' || tBuf.charAt(0) == '-')
+  char c = tBuf.charAt(0);
+  if(c == '+' || c == '-') {
+    result += c;
     firstDec = 1;
-  for(unsigned int x=firstDec; x < tBuf.length(); ++x) {
-    if(tBuf.charAt(x) == '.') {
+  }
+  for(unsigned int x=firstDec; x < bufLength; ++x) {
+    c = tBuf.charAt(x);
+    if(c == '.') {
+      if (mustBeInteger) return result;
+      // Only one decimal point allowed
+      if(decPt) return result;
+      else decPt = true;
+    }
+    else if(c < '0' || c > '9') return result;
+    result += c;
+  }
+  return result;
+}
+
+boolean isNumerical(const String& tBuf, bool mustBeInteger) {
+  const unsigned int bufLength = tBuf.length();
+  if (bufLength == 0) return false;
+  boolean decPt = false;
+  int firstDec = 0;
+  char c = tBuf.charAt(0);
+  if(c == '+' || c == '-')
+    firstDec = 1;
+  for(unsigned int x=firstDec; x < bufLength; ++x) {
+    c = tBuf.charAt(x);
+    if(c == '.') {
       if (mustBeInteger) return false;
       // Only one decimal point allowed
       if(decPt) return false;
       else decPt = true;
     }
-    else if(tBuf.charAt(x) < '0' || tBuf.charAt(x) > '9') return false;
+    else if(c < '0' || c > '9') return false;
   }
   return true;
 }
@@ -1478,11 +1053,11 @@ void initLog()
 {
   //make sure addLog doesnt do any stuff before initalisation of Settings is complete.
   Settings.UseSerial=true;
-  Settings.SyslogLevel=0;
   Settings.SyslogFacility=0;
-  Settings.SerialLogLevel=2; //logging during initialisation
-  Settings.WebLogLevel=2;
-  Settings.SDLogLevel=0;
+  setLogLevelFor(LOG_TO_SYSLOG, 0);
+  setLogLevelFor(LOG_TO_SERIAL, 2); //logging during initialisation
+  setLogLevelFor(LOG_TO_WEBLOG, 2);
+  setLogLevelFor(LOG_TO_SDCARD, 0);
 }
 
 /********************************************************************************************\
@@ -1500,17 +1075,16 @@ String getLogLevelDisplayString(byte index, int& logLevel) {
   }
 }
 
-
-void addLog(byte loglevel, String& string)
+void addToLog(byte loglevel, String& string)
 {
-  addLog(loglevel, string.c_str());
+  addToLog(loglevel, string.c_str());
 }
 
-void addLog(byte logLevel, const __FlashStringHelper* flashString)
+void addToLog(byte logLevel, const __FlashStringHelper* flashString)
 {
-    checkRAM(F("addLog"));
+    checkRAM(F("addToLog"));
     String s(flashString);
-    addLog(logLevel, s.c_str());
+    addToLog(logLevel, s.c_str());
 }
 
 bool SerialAvailableForWrite() {
@@ -1519,6 +1093,38 @@ bool SerialAvailableForWrite() {
     if (!Serial.availableForWrite()) return false; // UART FIFO overflow or TX disabled.
   #endif
   return true;
+}
+
+void disableSerialLog() {
+  log_to_serial_disabled = true;
+  setLogLevelFor(LOG_TO_SERIAL, 0);
+}
+
+void setLogLevelFor(byte destination, byte logLevel) {
+  switch (destination) {
+    case LOG_TO_SERIAL:
+      if (!log_to_serial_disabled || logLevel == 0)
+        Settings.SerialLogLevel = logLevel; break;
+    case LOG_TO_SYSLOG: Settings.SyslogLevel = logLevel;    break;
+    case LOG_TO_WEBLOG: Settings.WebLogLevel = logLevel;    break;
+    case LOG_TO_SDCARD: Settings.SDLogLevel = logLevel;     break;
+    default:
+      break;
+  }
+  updateLogLevelCache();
+}
+
+void updateLogLevelCache() {
+  byte max_lvl = 0;
+  max_lvl = _max(max_lvl, Settings.SerialLogLevel);
+  max_lvl = _max(max_lvl, Settings.SyslogLevel);
+  max_lvl = _max(max_lvl, Settings.WebLogLevel);
+  max_lvl = _max(max_lvl, Settings.SDLogLevel);
+  highest_active_log_level = max_lvl;
+}
+
+bool loglevelActiveFor(byte logLevel) {
+  return loglevelActive(logLevel, highest_active_log_level);
 }
 
 boolean loglevelActiveFor(byte destination, byte logLevel) {
@@ -1554,7 +1160,7 @@ boolean loglevelActive(byte logLevel, byte logLevelSettings) {
   return (logLevel <= logLevelSettings);
 }
 
-void addLog(byte logLevel, const char *line)
+void addToLog(byte logLevel, const char *line)
 {
   if (loglevelActiveFor(LOG_TO_SERIAL, logLevel)) {
     Serial.print(millis());
@@ -1592,12 +1198,15 @@ void delayedReboot(int rebootDelay)
     rebootDelay--;
     delay(1000);
   }
-   #if defined(ESP8266)
-     ESP.reset();
-   #endif
-   #if defined(ESP32)
-     ESP.restart();
-   #endif
+  reboot();
+}
+
+void reboot() {
+  #if defined(ESP32)
+    ESP.restart();
+  #else
+    ESP.reset();
+  #endif
 }
 
 
@@ -1757,9 +1366,10 @@ String parseTemplate(String &tmpString, byte lineSize)
               if (Settings.TaskDeviceEnabled[y])
               {
                 LoadTaskSettings(y);
-                if (ExtraTaskSettings.TaskDeviceName[0] != 0)
+                String taskDeviceName = getTaskDeviceName(y);
+                if (taskDeviceName.length() != 0)
                 {
-                  if (deviceName.equalsIgnoreCase(ExtraTaskSettings.TaskDeviceName))
+                  if (deviceName.equalsIgnoreCase(taskDeviceName))
                   {
                     boolean match = false;
                     for (byte z = 0; z < VARS_PER_TASK; z++)
@@ -1971,11 +1581,13 @@ String parseTemplate(String &tmpString, byte lineSize)
                                   newString += " ";
                               }
                               {
-                                String logFormatted = F("DEBUG: Formatted String='");
-                                logFormatted += newString;
-                                logFormatted += value;
-                                logFormatted += "'";
-                                addLog(LOG_LEVEL_DEBUG, logFormatted);
+                                if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+                                  String logFormatted = F("DEBUG: Formatted String='");
+                                  logFormatted += newString;
+                                  logFormatted += value;
+                                  logFormatted += "'";
+                                  addLog(LOG_LEVEL_DEBUG, logFormatted);
+                                }
                               }
                             }
                           }
@@ -1983,10 +1595,12 @@ String parseTemplate(String &tmpString, byte lineSize)
 
                           newString += String(value);
                           {
-                            String logParsed = F("DEBUG DEV: Parsed String='");
-                            logParsed += newString;
-                            logParsed += "'";
-                            addLog(LOG_LEVEL_DEBUG_DEV, logParsed);
+                            if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
+                              String logParsed = F("DEBUG DEV: Parsed String='");
+                              logParsed += newString;
+                              logParsed += "'";
+                              addLog(LOG_LEVEL_DEBUG_DEV, logParsed);
+                            }
                           }
                           break;
                         }
@@ -2331,11 +1945,11 @@ void rulesProcessing(String& event)
 {
   checkRAM(F("rulesProcessing"));
   unsigned long timer = millis();
-  String log = "";
-
-  log = F("EVENT: ");
-  log += event;
-  addLog(LOG_LEVEL_INFO, log);
+  if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+    String log = F("EVENT: ");
+    log += event;
+    addLog(LOG_LEVEL_INFO, log);
+  }
 
   for (byte x = 0; x < RULESETS_MAX; x++)
   {
@@ -2351,10 +1965,14 @@ void rulesProcessing(String& event)
       rulesProcessingFile(fileName, event);
   }
 
-  log += F(" Processing time:");
-  log += timePassedSince(timer);
-  log += F(" milliSeconds");
-  addLog(LOG_LEVEL_DEBUG, log);
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+    String log = F("EVENT: ");
+    log += event;
+    log += F(" Processing time:");
+    log += timePassedSince(timer);
+    log += F(" milliSeconds");
+    addLog(LOG_LEVEL_DEBUG, log);
+  }
 
 }
 
@@ -2377,8 +1995,7 @@ String rulesProcessingFile(String fileName, String& event)
   nestingLevel++;
   if (nestingLevel > RULES_MAX_NESTING_LEVEL)
   {
-    log = F("EVENT: Error: Nesting level exceeded!");
-    addLog(LOG_LEVEL_ERROR, log);
+    addLog(LOG_LEVEL_ERROR, F("EVENT: Error: Nesting level exceeded!"));
     nestingLevel--;
     return (log);
   }
@@ -2492,6 +2109,8 @@ String rulesProcessingFile(String fileName, String& event)
             {
               conditional = true;
               String check = lcAction.substring(split + 3);
+
+
               log = F("[if ");
               log += check;
               log += F("]=");
@@ -2527,9 +2146,11 @@ String rulesProcessingFile(String fileName, String& event)
             {
               ifBranche = false;
               isCommand = false;
-              log = F("else = ");
-              log += (conditional && (condition == ifBranche)) ? F("true") : F("false");
-              addLog(LOG_LEVEL_DEBUG, log);
+              if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+                String log = F("else = ");
+                log += (conditional && (condition == ifBranche)) ? F("true") : F("false");
+                addLog(LOG_LEVEL_DEBUG, log);
+              }
             }
 
             if (lcAction == "endif") // conditional block ends here
@@ -2556,9 +2177,12 @@ String rulesProcessingFile(String fileName, String& event)
                   action.replace(F("%eventvalue%"), tmpString); // substitute %eventvalue% in actions with the actual value from the event
                 }
               }
-              log = F("ACT  : ");
-              log += action;
-              addLog(LOG_LEVEL_INFO, log);
+
+              if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+                String log = F("ACT  : ");
+                log += action;
+                addLog(LOG_LEVEL_INFO, log);
+              }
 
               struct EventStruct TempEvent;
               parseCommandString(&TempEvent, action);
@@ -2567,11 +2191,13 @@ String rulesProcessingFile(String fileName, String& event)
               String tmpAction(action);
               if (!PluginCall(PLUGIN_WRITE, &TempEvent, tmpAction)) {
                 if (!tmpAction.equals(action)) {
-                  String log = F("PLUGIN_WRITE altered the string: ");
-                  log += action;
-                  log += F(" to: ");
-                  log += tmpAction;
-                  addLog(LOG_LEVEL_ERROR, log);
+                  if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
+                    String log = F("PLUGIN_WRITE altered the string: ");
+                    log += action;
+                    log += F(" to: ");
+                    log += tmpAction;
+                    addLog(LOG_LEVEL_ERROR, log);
+                  }
                 }
                 ExecuteCommand(VALUE_SOURCE_SYSTEM, action.c_str());
               }
@@ -2884,7 +2510,7 @@ void createRuleEvents(byte TaskIndex)
   byte sensorType = Device[DeviceIndex].VType;
   for (byte varNr = 0; varNr < Device[DeviceIndex].ValueCount; varNr++)
   {
-    String eventString = ExtraTaskSettings.TaskDeviceName;
+    String eventString = getTaskDeviceName(TaskIndex);
     eventString += F("#");
     eventString += ExtraTaskSettings.TaskDeviceValueNames[varNr];
     eventString += F("=");
@@ -2901,27 +2527,33 @@ void createRuleEvents(byte TaskIndex)
 
 void SendValueLogger(byte TaskIndex)
 {
+  bool featureSD = false;
+  #ifdef FEATURE_SD
+    featureSD = true;
+  #endif
+
   String logger;
+  if (featureSD || loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+    LoadTaskSettings(TaskIndex);
+    byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[TaskIndex]);
+    for (byte varNr = 0; varNr < Device[DeviceIndex].ValueCount; varNr++)
+    {
+      logger += getDateString('-');
+      logger += F(" ");
+      logger += getTimeString(':');
+      logger += F(",");
+      logger += Settings.Unit;
+      logger += F(",");
+      logger += getTaskDeviceName(TaskIndex);
+      logger += F(",");
+      logger += ExtraTaskSettings.TaskDeviceValueNames[varNr];
+      logger += F(",");
+      logger += formatUserVarNoCheck(TaskIndex, varNr);
+      logger += F("\r\n");
+    }
 
-  LoadTaskSettings(TaskIndex);
-  byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[TaskIndex]);
-  for (byte varNr = 0; varNr < Device[DeviceIndex].ValueCount; varNr++)
-  {
-    logger += getDateString('-');
-    logger += F(" ");
-    logger += getTimeString(':');
-    logger += F(",");
-    logger += Settings.Unit;
-    logger += F(",");
-    logger += ExtraTaskSettings.TaskDeviceName;
-    logger += F(",");
-    logger += ExtraTaskSettings.TaskDeviceValueNames[varNr];
-    logger += F(",");
-    logger += formatUserVarNoCheck(TaskIndex, varNr);
-    logger += F("\r\n");
+    addLog(LOG_LEVEL_DEBUG, logger);
   }
-
-  addLog(LOG_LEVEL_DEBUG, logger);
 
 #ifdef FEATURE_SD
   String filename = F("VALUES.CSV");
@@ -2994,15 +2626,17 @@ class RamTracker{
        if (writePtr >= TRACEENTRIES) writePtr=0;          // inc write pointer and wrap around too.
     };
    void getTraceBuffer(){                                // return giant strings, one line per trace. Add stremToWeb method to avoid large strings.
-      String retval="Memtrace\n";
-      for (int i = 0; i< TRACES; i++){
-        retval += String(i);
-        retval += ": lowest: ";
-        retval += String(tracesMemory[i]);
-        retval += "  ";
-        retval += traces[i];
-        addLog(LOG_LEVEL_DEBUG_DEV, retval);
-        retval="";
+      if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
+        String retval="Memtrace\n";
+        for (int i = 0; i< TRACES; i++){
+          retval += String(i);
+          retval += ": lowest: ";
+          retval += String(tracesMemory[i]);
+          retval += "  ";
+          retval += traces[i];
+          addLog(LOG_LEVEL_DEBUG_DEV, retval);
+          retval="";
+        }
       }
     }
 }myRamTracker;                                              // instantiate class. (is global now)
@@ -3238,16 +2872,8 @@ void ArduinoOTAInit()
 {
   checkRAM(F("ArduinoOTAInit"));
 
-  #if defined(ESP8266)
-  // Default port is 8266
-  ArduinoOTA.setPort(8266);
-  #endif
-  #if defined(ESP32)
-  ArduinoOTA.setPort(3232);
-  #endif
-
+  ArduinoOTA.setPort(ARDUINO_OTA_PORT);
   ArduinoOTA.setHostname(Settings.Name);
-
   if (SecuritySettings.Password[0]!=0)
     ArduinoOTA.setPassword(SecuritySettings.Password);
 
@@ -3262,12 +2888,7 @@ void ArduinoOTAInit()
       //so dont touch device until restart is complete
       Serial.println(F("\nOTA  : DO NOT RESET OR POWER OFF UNTIL BOOT+FLASH IS COMPLETE."));
       delay(100);
-      #if defined(ESP8266)
-        ESP.reset();
-      #endif
-      #if defined(ESP32)
-        ESP.restart();
-      #endif
+      reboot();
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
 
@@ -3283,18 +2904,15 @@ void ArduinoOTAInit()
       else if (error == OTA_END_ERROR) Serial.println(F("End Failed"));
 
       delay(100);
-      #if defined(ESP8266)
-       ESP.reset();
-      #endif
-      #if defined(ESP32)
-        ESP.restart();
-      #endif
+      reboot();
   });
   ArduinoOTA.begin();
 
-  String log = F("OTA  : Arduino OTA enabled on port 8266");
-  addLog(LOG_LEVEL_INFO, log);
-
+  if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+    String log = F("OTA  : Arduino OTA enabled on port ");
+    log += ARDUINO_OTA_PORT;
+    addLog(LOG_LEVEL_INFO, log);
+  }
 }
 
 #endif

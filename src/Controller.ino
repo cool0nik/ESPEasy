@@ -3,6 +3,7 @@
 //********************************************************************************
 void sendData(struct EventStruct *event)
 {
+  START_TIMER;
   checkRAM(F("sendData"));
  LoadTaskSettings(event->TaskIndex);
   if (Settings.UseRules)
@@ -55,10 +56,12 @@ void sendData(struct EventStruct *event)
 
   PluginCall(PLUGIN_EVENT_OUT, event, dummyString);
   lastSend = millis();
+  STOP_TIMER(SEND_DATA_STATS);
 }
 
 boolean validUserVar(struct EventStruct *event) {
-  for (int i = 0; i < VARS_PER_TASK; ++i) {
+  byte valueCount = getValueCountFromSensorType(event->sensorType);
+  for (int i = 0; i < valueCount; ++i) {
     const float f(UserVar[event->BaseVarIndex + i]);
     if (!isValidFloat(f)) return false;
   }
@@ -90,14 +93,16 @@ void callback(char* c_topic, byte* b_payload, unsigned int length) {
   c_payload[length] = 0;
 
 /*
-  String log;
-  log=F("MQTT : Topic: ");
-  log+=c_topic;
-  addLog(LOG_LEVEL_DEBUG_MORE, log);
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+    String log;
+    log=F("MQTT : Topic: ");
+    log+=c_topic;
+    addLog(LOG_LEVEL_DEBUG_MORE, log);
 
-  log=F("MQTT : Payload: ");
-  log+=c_payload;
-  addLog(LOG_LEVEL_DEBUG_MORE, log);
+    log=F("MQTT : Payload: ");
+    log+=c_payload;
+    addLog(LOG_LEVEL_DEBUG_MORE, log);
+  }
   */
 
   // sprintf_P(log, PSTR("%s%s"), "MQTT : Topic: ", c_topic);
@@ -139,8 +144,10 @@ bool MQTTConnect(int controller_idx)
   String clientid;
   if(Settings.MQTTUseUnitNameAsClientId){
     clientid = Settings.Name;
-    clientid += F("_");
-    clientid += Settings.Unit;
+    if (Settings.Unit != 0) { // only append non-zero unit number
+      clientid += F("_");
+      clientid += Settings.Unit;
+    }
   }
   else{
     clientid = F("ESPClient_");
@@ -257,7 +264,7 @@ void SendStatus(byte source, String status)
 boolean MQTTpublish(int controller_idx, const char* topic, const char* payload, boolean retained)
 {
   if (MQTTclient.publish(topic, payload, retained)) {
-    timermqtt = millis() + 10; // Make sure the MQTT is being processed as soon as possible.
+    setIntervalTimerOverride(TIMER_MQTT, 10); // Make sure the MQTT is being processed as soon as possible.
     return true;
   }
   addLog(LOG_LEVEL_DEBUG, F("MQTT : publish failed"));

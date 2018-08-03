@@ -117,7 +117,7 @@ void C013_SendUDPTaskInfo(byte destUnit, byte sourceTaskIndex, byte destTaskInde
   infoReply.destTaskIndex = destTaskIndex;
   LoadTaskSettings(infoReply.sourceTaskIndex);
   infoReply.deviceNumber = Settings.TaskDeviceNumber[infoReply.sourceTaskIndex];
-  strcpy(infoReply.taskName, ExtraTaskSettings.TaskDeviceName);
+  strcpy(infoReply.taskName, getTaskDeviceName(infoReply.sourceTaskIndex).c_str());
   for (byte x = 0; x < VARS_PER_TASK; x++)
     strcpy(infoReply.ValueNames[x], ExtraTaskSettings.TaskDeviceValueNames[x]);
 
@@ -180,9 +180,11 @@ void C013_sendUDP(byte unit, byte* data, byte size)
   if (unit != 255)
     if (Nodes[unit].ip[0] == 0)
       return;
-  String log = F("C013 : Send UDP message to ");
-  log += unit;
-  addLog(LOG_LEVEL_DEBUG_MORE, log);
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+    String log = F("C013 : Send UDP message to ");
+    log += unit;
+    addLog(LOG_LEVEL_DEBUG_MORE, log);
+  }
 
   statusLED(true);
 
@@ -197,16 +199,17 @@ void C013_sendUDP(byte unit, byte* data, byte size)
 }
 
 void C013_Receive(struct EventStruct *event) {
-
-  if (event->Data[1] > 1 && event->Data[1] < 6)
-  {
-    String log = (F("C013 : msg "));
-    for (byte x = 1; x < 6; x++)
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
+    if (event->Data[1] > 1 && event->Data[1] < 6)
     {
-      log += " ";
-      log += (int)event->Data[x];
+      String log = (F("C013 : msg "));
+      for (byte x = 1; x < 6; x++)
+      {
+        log += " ";
+        log += (int)event->Data[x];
+      }
+      addLog(LOG_LEVEL_DEBUG_MORE, log);
     }
-    addLog(LOG_LEVEL_DEBUG_MORE, log);
   }
 
   switch (event->Data[1]) {
@@ -225,6 +228,7 @@ void C013_Receive(struct EventStruct *event) {
         // so it will write only once and has to be cleared manually through webgui
         if (Settings.TaskDeviceNumber[infoReply.destTaskIndex] == 0)
         {
+          taskClear(infoReply.destTaskIndex, false);
           Settings.TaskDeviceNumber[infoReply.destTaskIndex] = infoReply.deviceNumber;
           Settings.TaskDeviceDataFeed[infoReply.destTaskIndex] = 1;  // remote feed
           for (byte x = 0; x < CONTROLLER_MAX; x++)
@@ -232,6 +236,7 @@ void C013_Receive(struct EventStruct *event) {
           strcpy(ExtraTaskSettings.TaskDeviceName, infoReply.taskName);
           for (byte x = 0; x < VARS_PER_TASK; x++)
             strcpy( ExtraTaskSettings.TaskDeviceValueNames[x], infoReply.ValueNames[x]);
+          ExtraTaskSettings.TaskIndex = infoReply.destTaskIndex;
           SaveTaskSettings(infoReply.destTaskIndex);
           SaveSettings();
         }

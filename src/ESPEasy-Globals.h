@@ -73,7 +73,7 @@
 #define DEFAULT_USE_RULES                       false   // (true|false) Enable Rules?
 
 #define DEFAULT_MQTT_RETAIN                     false   // (true|false) Retain MQTT messages?
-#define DEFAULT_MQTT_DELAY                      1000    // Time in milliseconds to retain MQTT messages
+#define DEFAULT_MQTT_DELAY                      100    // Time in milliseconds to retain MQTT messages
 #define DEFAULT_MQTT_LWT_TOPIC                  ""      // Default lwt topic
 #define DEFAULT_MQTT_LWT_CONNECT_MESSAGE        "Connected" // Default lwt message
 #define DEFAULT_MQTT_LWT_DISCONNECT_MESSAGE     "Connection Lost" // Default lwt message
@@ -121,6 +121,11 @@
   #define FEATURE_ADC_VCC                  false
 #endif
 
+#if defined(ESP32)
+#define ARDUINO_OTA_PORT  3232
+#else
+#define ARDUINO_OTA_PORT  8266
+#endif
 
 #if defined(ESP8266)
   //enable Arduino OTA updating.
@@ -183,12 +188,20 @@
 #endif
 
 #define MAX_FLASHWRITES_PER_DAY           100 // per 24 hour window
+#define INPUT_COMMAND_SIZE                 80
 
 #define NODE_TYPE_ID_ESP_EASY_STD           1
 #define NODE_TYPE_ID_ESP_EASYM_STD         17
 #define NODE_TYPE_ID_ESP_EASY32_STD        33
 #define NODE_TYPE_ID_ARDUINO_EASY_STD      65
 #define NODE_TYPE_ID_NANO_EASY_STD         81
+
+#define TIMER_20MSEC                        1
+#define TIMER_100MSEC                       2
+#define TIMER_1SEC                          3
+#define TIMER_30SEC                         4
+#define TIMER_MQTT                          5
+#define TIMER_STATISTICS                    6
 
 #define PLUGIN_INIT_ALL                     1
 #define PLUGIN_INIT                         2
@@ -284,13 +297,12 @@
 #define NPLUGIN_MAX                         4
 #define UNIT_MAX                           32 // Only relevant for UDP unicast message 'sweeps' and the nodelist.
 #define RULES_TIMER_MAX                     8
-#define SYSTEM_TIMER_MAX                    8
-#define SYSTEM_CMD_TIMER_MAX                2
 #define PINSTATE_TABLE_MAX                 32
 #define RULES_MAX_SIZE                   2048
 #define RULES_MAX_NESTING_LEVEL             3
 #define RULESETS_MAX                        4
 #define RULES_BUFFER_SIZE                  64
+#define NAME_FORMULA_LENGTH_MAX            40
 
 #define PIN_MODE_UNDEFINED                  0
 #define PIN_MODE_INPUT                      1
@@ -333,8 +345,9 @@
 #define BOOT_CAUSE_DEEP_SLEEP               2
 #define BOOT_CAUSE_EXT_WD                  10
 
-#define DAT_TASKS_SIZE                   2048
-#define DAT_TASKS_CUSTOM_OFFSET          1024
+#define DAT_TASKS_DISTANCE               2048  // DAT_TASKS_SIZE + DAT_TASKS_CUSTOM_SIZE
+#define DAT_TASKS_SIZE                   1024
+#define DAT_TASKS_CUSTOM_OFFSET          1024  // Equal to DAT_TASKS_SIZE
 #define DAT_TASKS_CUSTOM_SIZE            1024
 #define DAT_CUSTOM_CONTROLLER_SIZE       1024
 #define DAT_CONTROLLER_SIZE              1024
@@ -353,6 +366,30 @@
   #define CONFIG_FILE_SIZE               131072
 #endif
 
+enum SettingsType {
+  TaskSettings_Type = 0,
+  CustomTaskSettings_Type,
+  ControllerSettings_Type,
+  CustomControllerSettings_Type,
+  NotificationSettings_Type,
+
+  SettingsType_MAX
+
+};
+bool getSettingsParameters(SettingsType settingsType, int index, int& offset, int& max_size);
+String getSettingsTypeString(SettingsType settingsType) {
+  switch (settingsType) {
+    case TaskSettings_Type:             return F("TaskSettings");
+    case CustomTaskSettings_Type:       return F("CustomTaskSettings");
+    case ControllerSettings_Type:       return F("ControllerSettings");
+    case CustomControllerSettings_Type: return F("CustomControllerSettings");
+    case NotificationSettings_Type:     return F("NotificationSettings");
+    default:
+      break;
+  }
+  return String();
+}
+
 /*
         To modify the stock configuration without changing this repo file :
     - define USE_CUSTOM_H as a build flags. ie : export PLATFORMIO_BUILD_FLAGS="'-DUSE_CUSTOM_H'"
@@ -367,6 +404,7 @@
 #include "ESPEasyTimeTypes.h"
 #include "I2CTypes.h"
 #include <I2Cdev.h>
+#include <map>
 
 #define FS_NO_GLOBALS
 #if defined(ESP8266)
@@ -386,7 +424,7 @@
     #include <lwip/tcp_impl.h>
   #endif
   #include <ESP8266WiFi.h>
-  #include <ESP8266Ping.h>
+  //#include <ESP8266Ping.h>
   #include <ESP8266WebServer.h>
   ESP8266WebServer WebServer(80);
   #include <DNSServer.h>
@@ -500,6 +538,11 @@ int mqtt_reconnect_count = 0;
 // udp protocol stuff (syslog, global sync, node info list, ntp time)
 WiFiUDP portUDP;
 
+class TimingStats;
+
+#define LOADFILE_STATS  0
+#define LOOP_STATS      1
+
 struct CRCStruct{
   char compileTimeMD5[16+32+1]= "MD5_MD5_MD5_MD5_BoundariesOfTheSegmentsGoHere...";
   char binaryFilename[32+32+1]= "ThisIsTheDummyPlaceHolderForTheBinaryFilename64ByteLongFilenames";
@@ -510,82 +553,7 @@ struct CRCStruct{
   uint32_t numberOfCRCBytes=0;
 }CRCValues;
 
-enum Command {
-  cmd_Unknown,
-  cmd_accessinfo,
-  cmd_background,
-  cmd_BlynkGet,
-  cmd_build,
-  cmd_clearaccessblock,
-  cmd_clearRTCRAM,
-  cmd_config,
-  cmd_Debug,
-  cmd_Delay,
-  cmd_deepSleep,
-  cmd_DNS,
-  cmd_DST,
-  cmd_Erase,
-  cmd_Event,
-  cmd_executeRules,
-  cmd_gateway,
-  cmd_i2cscanner,
-  cmd_IP,
-  cmd_Load,
-  cmd_logentry,
-  cmd_lowmem,
-  cmd_malloc,
-  cmd_meminfo,
-  cmd_MQTTRetainFlag,
-  cmd_messageDelay,
-  cmd_Name,
-  cmd_notify,
-  cmd_NoSleep,
-  cmd_NTPHost,
-  cmd_Password,
-  cmd_Publish,
-  cmd_Reboot,
-  cmd_Reset,
-  cmd_Restart,
-  cmd_resetFlashWriteCounter,
-  cmd_Rules,
-  cmd_sdcard,
-  cmd_sdremove,
-  cmd_sysload,
-  cmd_Save,
-  cmd_SendTo,
-  cmd_SendToHTTP,
-  cmd_SendToUDP,
-  cmd_SerialFloat,
-  cmd_Settings,
-  cmd_subnet,
-  cmd_TaskClear,
-  cmd_TaskClearAll,
-  cmd_TaskRun,
-  cmd_TaskValueSet,
-  cmd_TaskValueSetAndRun,
-  cmd_TimerSet,
-  cmd_TimerPause,
-  cmd_TimerResume,
-  cmd_TimeZone,
-  cmd_udptest,
-  cmd_Unit,
-  cmd_useNTP,
-  cmd_UDPPort,
-  cmd_wdconfig,
-  cmd_wdread,
-  cmd_WifiAPMode,
-  cmd_WifiConnect,
-  cmd_WifiDisconnect,
-  cmd_WifiKey2,
-  cmd_WifiKey,
-  cmd_WifiSSID2,
-  cmd_WifiSSID,
-  cmd_WifiScan
-};
 
-
-// Forward declarations.
-Command commandStringToEnum(const char * cmd);
 bool WiFiConnected(uint32_t timeout_ms);
 bool WiFiConnected();
 bool hostReachable(const IPAddress& ip);
@@ -639,48 +607,94 @@ struct SecurityStruct
 
 struct SettingsStruct
 {
-  SettingsStruct() :
-    PID(0), Version(0), Build(0), IP_Octet(0), Unit(0), Delay(0),
-    Pin_i2c_sda(-1), Pin_i2c_scl(-1), Pin_status_led(-1), Pin_sd_cs(-1),
-    UDPPort(0), SyslogLevel(0), SerialLogLevel(0), WebLogLevel(0), SDLogLevel(0),
-    BaudRate(0), MessageDelay(0), deepSleep(0),
-    CustomCSS(false), DST(false), WDI2CAddress(0),
-    UseRules(false), UseSerial(false), UseSSDP(false), UseNTP(false),
-    WireClockStretchLimit(0), GlobalSync(false), ConnectionFailuresThreshold(0),
-    TimeZone(0), MQTTRetainFlag(false), InitSPI(false),
-    Pin_status_led_Inversed(false), deepSleepOnFail(false), UseValueLogger(false),
-    DST_Start(0), DST_End(0), UseRTOSMultitasking(false), Pin_Reset(-1),
-    SyslogFacility(DEFAULT_SYSLOG_FACILITY), StructSize(0), MQTTUseUnitNameAsClientId(0)
-    {
-      for (byte i = 0; i < CONTROLLER_MAX; ++i) {
-        Protocol[i] = 0;
-        ControllerEnabled[i] = false;
-        for (byte task = 0; task < TASKS_MAX; ++task) {
-          TaskDeviceID[i][task] = 0;
-          TaskDeviceSendData[i][task] = false;
-        }
-      }
-      for (byte task = 0; task < TASKS_MAX; ++task) {
-        TaskDeviceNumber[task] = 0;
-        OLD_TaskDeviceID[task] = 0;
-        TaskDevicePin1PullUp[task] = false;
-        for (byte cv = 0; cv < PLUGIN_CONFIGVAR_MAX; ++cv) {
-          TaskDevicePluginConfig[task][cv] = 0;
-        }
-        TaskDevicePin1Inversed[task] = false;
-        for (byte cv = 0; cv < PLUGIN_CONFIGFLOATVAR_MAX; ++cv) {
-          TaskDevicePluginConfigFloat[task][cv] = 0.0;
-        }
-        for (byte cv = 0; cv < PLUGIN_CONFIGLONGVAR_MAX; ++cv) {
-          TaskDevicePluginConfigLong[task][cv] = 0;
-        }
-        OLD_TaskDeviceSendData[task] = false;
-        TaskDeviceGlobalSync[task] = false;
-        TaskDeviceDataFeed[task] = 0;
-        TaskDeviceTimer[task] = 0;
-        TaskDeviceEnabled[task] = false;
-      }
+  SettingsStruct() {
+    clearAll();
+  }
+
+  void clearAll() {
+    PID = 0;
+    Version = 0;
+    Build = 0;
+    IP_Octet = 0;
+    Unit = 0;
+    Delay = 0;
+    Pin_i2c_sda = -1;
+    Pin_i2c_scl = -1;
+    Pin_status_led = -1;
+    Pin_sd_cs = -1;
+    UDPPort = 0;
+    SyslogLevel = 0;
+    SerialLogLevel = 0;
+    WebLogLevel = 0;
+    SDLogLevel = 0;
+    BaudRate = 0;
+    MessageDelay = 0;
+    deepSleep = 0;
+    CustomCSS = false;
+    DST = false;
+    WDI2CAddress = 0;
+    UseRules = false;
+    UseSerial = false;
+    UseSSDP = false;
+    UseNTP = false;
+    WireClockStretchLimit = 0;
+    GlobalSync = false;
+    ConnectionFailuresThreshold = 0;
+    TimeZone = 0;
+    MQTTRetainFlag = false;
+    InitSPI = false;
+    Pin_status_led_Inversed = false;
+    deepSleepOnFail = false;
+    UseValueLogger = false;
+    DST_Start = 0;
+    DST_End = 0;
+    UseRTOSMultitasking = false;
+    Pin_Reset = -1;
+    SyslogFacility = DEFAULT_SYSLOG_FACILITY;
+    StructSize = 0;
+    MQTTUseUnitNameAsClientId = 0;
+
+    for (byte i = 0; i < CONTROLLER_MAX; ++i) {
+      Protocol[i] = 0;
+      ControllerEnabled[i] = false;
     }
+    for (byte i = 0; i < NOTIFICATION_MAX; ++i) {
+      Notification[i] = 0;
+      NotificationEnabled[i] = false;
+    }
+    for (byte task = 0; task < TASKS_MAX; ++task) {
+      clearTask(task);
+    }
+  }
+
+  void clearTask(byte task) {
+    for (byte i = 0; i < CONTROLLER_MAX; ++i) {
+      TaskDeviceID[i][task] = 0;
+      TaskDeviceSendData[i][task] = false;
+    }
+    TaskDeviceNumber[task] = 0;
+    OLD_TaskDeviceID[task] = 0;
+    TaskDevicePin1[task] = -1;
+    TaskDevicePin2[task] = -1;
+    TaskDevicePin3[task] = -1;
+    TaskDevicePort[task] = 0;
+    TaskDevicePin1PullUp[task] = false;
+    for (byte cv = 0; cv < PLUGIN_CONFIGVAR_MAX; ++cv) {
+      TaskDevicePluginConfig[task][cv] = 0;
+    }
+    TaskDevicePin1Inversed[task] = false;
+    for (byte cv = 0; cv < PLUGIN_CONFIGFLOATVAR_MAX; ++cv) {
+      TaskDevicePluginConfigFloat[task][cv] = 0.0;
+    }
+    for (byte cv = 0; cv < PLUGIN_CONFIGLONGVAR_MAX; ++cv) {
+      TaskDevicePluginConfigLong[task][cv] = 0;
+    }
+    OLD_TaskDeviceSendData[task] = false;
+    TaskDeviceGlobalSync[task] = false;
+    TaskDeviceDataFeed[task] = 0;
+    TaskDeviceTimer[task] = 0;
+    TaskDeviceEnabled[task] = false;
+  }
 
   unsigned long PID;
   int           Version;
@@ -741,12 +755,12 @@ struct SettingsStruct
   long          TaskDevicePluginConfigLong[TASKS_MAX][PLUGIN_CONFIGLONGVAR_MAX];
   boolean       OLD_TaskDeviceSendData[TASKS_MAX];
   boolean       TaskDeviceGlobalSync[TASKS_MAX];
-  byte          TaskDeviceDataFeed[TASKS_MAX];
+  byte          TaskDeviceDataFeed[TASKS_MAX];    // When set to 0, only read local connected sensorsfeeds
   unsigned long TaskDeviceTimer[TASKS_MAX];
   boolean       TaskDeviceEnabled[TASKS_MAX];
   boolean       ControllerEnabled[CONTROLLER_MAX];
   boolean       NotificationEnabled[NOTIFICATION_MAX];
-  unsigned int  TaskDeviceID[CONTROLLER_MAX][TASKS_MAX];
+  unsigned int  TaskDeviceID[CONTROLLER_MAX][TASKS_MAX];        // IDX number (mainly used by Domoticz)
   boolean       TaskDeviceSendData[CONTROLLER_MAX][TASKS_MAX];
   boolean       Pin_status_led_Inversed;
   boolean       deepSleepOnFail;
@@ -763,6 +777,8 @@ struct SettingsStruct
   //its safe to extend this struct, up to several bytes, default values in config are 0
   //look in misc.ino how config.dat is used because also other stuff is stored in it at different offsets.
   //TODO: document config.dat somewhere here
+  float         Latitude;
+  float         Longitude;
 
   // FIXME @TD-er: As discussed in #1292, the CRC for the settings is now disabled.
   // make sure crc is the last value in the struct
@@ -916,15 +932,26 @@ struct NotificationSettingsStruct
   //its safe to extend this struct, up to 4096 bytes, default values in config are 0
 };
 
+// This is only used by some plugins to store extra settings like formula descriptions.
+// These settings can only be active for one plugin, meaning they have to be loaded
+// over and over again from flash when another active plugin uses these values.
+//FIXME @TD-er: Should think of another mechanism to make this more efficient.
 struct ExtraTaskSettingsStruct
 {
-  ExtraTaskSettingsStruct() : TaskIndex(0) {
-    TaskDeviceName[0] = 0;
+  ExtraTaskSettingsStruct() : TaskIndex(TASKS_MAX) {
+    clear();
+  }
+
+  void clear() {
+    TaskIndex = TASKS_MAX;
+    for (byte j = 0; j < (NAME_FORMULA_LENGTH_MAX + 1); ++j) {
+      TaskDeviceName[j] = 0;
+    }
     for (byte i = 0; i < VARS_PER_TASK; ++i) {
-      for (byte j = 0; j < 41; ++j) {
+      for (byte j = 0; j < (NAME_FORMULA_LENGTH_MAX + 1); ++j) {
         TaskDeviceFormula[i][j] = 0;
         TaskDeviceValueNames[i][j] = 0;
-        TaskDeviceValueDecimals[i] = 0;
+        TaskDeviceValueDecimals[i] = 2;
       }
     }
     for (byte i = 0; i < PLUGIN_EXTRACONFIGVAR_MAX; ++i) {
@@ -933,10 +960,46 @@ struct ExtraTaskSettingsStruct
     }
   }
 
-  byte    TaskIndex;
-  char    TaskDeviceName[41];
-  char    TaskDeviceFormula[VARS_PER_TASK][41];
-  char    TaskDeviceValueNames[VARS_PER_TASK][41];
+  bool checkUniqueValueNames() {
+    for (int i = 0; i < (VARS_PER_TASK - 1); ++i) {
+      for (int j = i; j < VARS_PER_TASK; ++j) {
+        if (i != j && TaskDeviceValueNames[i][0] != 0) {
+          if (strcasecmp(TaskDeviceValueNames[i], TaskDeviceValueNames[j]) == 0)
+            return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  bool checkInvalidCharInNames(const char* name) {
+    int pos = 0;
+    while (*(name+pos) != 0) {
+      switch (*(name+pos)) {
+        case ',':
+        case ' ':
+        case '#':
+        case '[':
+        case ']':
+          return false;
+      }
+      ++pos;
+    }
+    return true;
+  }
+
+  bool checkInvalidCharInNames() {
+    if (!checkInvalidCharInNames(&TaskDeviceName[0])) return false;
+    for (int i = 0; i < (VARS_PER_TASK - 1); ++i) {
+      if (!checkInvalidCharInNames(&TaskDeviceValueNames[i][0])) return false;
+    }
+    return true;
+  }
+
+  byte    TaskIndex;  // Always < TASKS_MAX
+  char    TaskDeviceName[NAME_FORMULA_LENGTH_MAX + 1];
+  char    TaskDeviceFormula[VARS_PER_TASK][NAME_FORMULA_LENGTH_MAX + 1];
+  char    TaskDeviceValueNames[VARS_PER_TASK][NAME_FORMULA_LENGTH_MAX + 1];
   long    TaskDevicePluginConfigLong[PLUGIN_EXTRACONFIGVAR_MAX];
   byte    TaskDeviceValueDecimals[VARS_PER_TASK];
   int16_t TaskDevicePluginConfig[PLUGIN_EXTRACONFIGVAR_MAX];
@@ -1097,6 +1160,11 @@ struct LogStruct {
 
 } Logging;
 
+byte highest_active_log_level = 0;
+bool log_to_serial_disabled = false;
+// Do this in a template to prevent casting to String when not needed.
+#define addLog(L,S) if (loglevelActiveFor(L)) { addToLog(L,S); }
+
 struct DeviceStruct
 {
   DeviceStruct() :
@@ -1104,20 +1172,26 @@ struct DeviceStruct
     PullUpOption(false), InverseLogicOption(false), FormulaOption(false),
     ValueCount(0), Custom(false), SendDataOption(false), GlobalSyncOption(false),
     TimerOption(false), TimerOptional(false), DecimalsOnly(false) {}
-  byte Number;
-  byte Type;
-  byte VType;
-  byte Ports;
-  boolean PullUpOption;
-  boolean InverseLogicOption;
-  boolean FormulaOption;
-  byte ValueCount;
+
+  bool connectedToGPIOpins() {
+    return (Type >= DEVICE_TYPE_SINGLE && Type <= DEVICE_TYPE_TRIPLE);
+  }
+
+
+  byte Number;  // Plugin ID number.   (PLUGIN_ID_xxx)
+  byte Type;    // How the device is connected. e.g. DEVICE_TYPE_SINGLE => connected through 1 datapin
+  byte VType;   // Type of value the plugin will return, used only for Domoticz
+  byte Ports;   // Port to use when device has multiple I/O pins  (N.B. not used much)
+  boolean PullUpOption;       // Allow to set internal pull-up resistors.
+  boolean InverseLogicOption; // Allow to invert the boolean state (e.g. a switch)
+  boolean FormulaOption;      // Allow to enter a formula to convert values during read. (not possible with Custom enabled)
+  byte ValueCount;            // The number of output values of a plugin. The value should match the number of keys PLUGIN_VALUENAME1_xxx
   boolean Custom;
-  boolean SendDataOption;
-  boolean GlobalSyncOption;
-  boolean TimerOption;
-  boolean TimerOptional;
-  boolean DecimalsOnly;
+  boolean SendDataOption;     // Allow to send data to a controller.
+  boolean GlobalSyncOption;   // No longer used. Was used for ESPeasy values sync between nodes
+  boolean TimerOption;        // Allow to set the "Interval" timer for the plugin.
+  boolean TimerOptional;      // When taskdevice timer is not set and not optional, use default "Interval" delay (Settings.Delay)
+  boolean DecimalsOnly;       // Allow to set the number of decimals (otherwise treated a 0 decimals)
 } Device[DEVICES_MAX + 1]; // 1 more because first device is empty device
 
 struct ProtocolStruct
@@ -1171,16 +1245,8 @@ struct systemTimerStruct
   int Par3;
   int Par4;
   int Par5;
-} systemTimers[SYSTEM_TIMER_MAX];
-
-#define NOTAVAILABLE_SYSTEM_TIMER_ERROR "There are no system timer available, max parallel timers are " STR(SYSTEM_TIMER_MAX)
-
-struct systemCMDTimerStruct
-{
-  systemCMDTimerStruct() : timer(0) {}
-  unsigned long timer;
-  String action;
-} systemCMDTimers[SYSTEM_CMD_TIMER_MAX];
+};
+std::map<unsigned long, systemTimerStruct> systemTimers;
 
 struct pinStatesStruct
 {
@@ -1219,19 +1285,15 @@ String printWebString = "";
 boolean printToWebJSON = false;
 
 float UserVar[VARS_PER_TASK * TASKS_MAX];
-struct rulesTiemerStatus
+struct rulesTimerStatus
 {
   unsigned long timestamp;
-  unsigned int interval; //interval in millisencond
+  unsigned int interval; //interval in milliseconds
   boolean paused;
 } RulesTimer[RULES_TIMER_MAX];
 
-unsigned long timerSensor[TASKS_MAX];
-unsigned long timer100ms;
-unsigned long timer20ms;
-unsigned long timer1s;
-unsigned long timerwd;
-unsigned long timermqtt;
+msecTimerHandlerStruct msecTimerHandler;
+
 unsigned long timermqtt_interval;
 unsigned long lastSend;
 unsigned long lastWeb;
@@ -1249,7 +1311,8 @@ boolean WebLoggedIn = false;
 int WebLoggedInTimer = 300;
 
 boolean (*Plugin_ptr[PLUGIN_MAX])(byte, struct EventStruct*, String&);
-byte Plugin_id[PLUGIN_MAX];
+std::vector<byte> Plugin_id;
+std::vector<int> Task_id_to_Plugin_id;
 
 boolean (*CPlugin_ptr[CPLUGIN_MAX])(byte, struct EventStruct*, String&);
 byte CPlugin_id[CPLUGIN_MAX];
@@ -1354,12 +1417,19 @@ bool processedScanDone = true;
 bool webserver_state = false;
 bool webserver_init = false;
 
+unsigned long idle_msec_per_sec = 0;
 unsigned long elapsed10ps = 0;
 unsigned long elapsed10psU = 0;
 unsigned long elapsed50ps = 0;
 unsigned long loopCounter = 0;
 unsigned long loopCounterLast = 0;
 unsigned long loopCounterMax = 1;
+unsigned long lastLoopStart = 0;
+unsigned long shortestLoop = 10000000;
+unsigned long longestLoop = 0;
+unsigned long loopCounter_full = 1;
+float loop_usec_duration_total = 0.0;
+unsigned long countFindPluginId = 0;
 
 unsigned long dailyResetCounter = 0;
 
@@ -1377,9 +1447,184 @@ boolean       UseRTOSMultitasking;
 
 void (*MainLoopCall_ptr)(void);
 
+class TimingStats {
+    public:
+      TimingStats() : _timeTotal(0.0), _count(0), _maxVal(0), _minVal(4294967295) {}
+
+      void add(unsigned long time) {
+          _timeTotal += time;
+          ++_count;
+          if (time > _maxVal) _maxVal = time;
+          if (time < _minVal) _minVal = time;
+      }
+
+      void reset() {
+          _timeTotal = 0.0;
+          _count = 0;
+          _maxVal = 0;
+          _minVal = 4294967295;
+      }
+
+      bool isEmpty() const {
+          return _count == 0;
+      }
+
+      float getAvg() const {
+        if (_count == 0) return 0.0;
+        return _timeTotal / _count;
+      }
+
+      unsigned int getMinMax(unsigned long& minVal, unsigned long& maxVal) const {
+          if (_count == 0) {
+              minVal = 0;
+              maxVal = 0;
+              return 0;
+          }
+          minVal = _minVal;
+          maxVal = _maxVal;
+          return _count;
+      }
+
+    private:
+      float _timeTotal;
+      unsigned int _count;
+      unsigned long _maxVal;
+      unsigned long _minVal;
+};
+
+String getLogLine(const TimingStats& stats) {
+    unsigned long minVal, maxVal;
+    unsigned int c = stats.getMinMax(minVal, maxVal);
+    String log;
+    log.reserve(64);
+    log += F("Count: ");
+    log += c;
+    log += F(" Avg/min/max ");
+    log += stats.getAvg();
+    log += '/';
+    log += minVal;
+    log += '/';
+    log += maxVal;
+    log += F(" usec");
+    return log;
+}
+
+
+
+String getPluginFunctionName(int function) {
+    switch(function) {
+        case PLUGIN_INIT_ALL:              return F("INIT_ALL            ");
+        case PLUGIN_INIT:                  return F("INIT                ");
+        case PLUGIN_READ:                  return F("READ                ");
+        case PLUGIN_ONCE_A_SECOND:         return F("ONCE_A_SECOND       ");
+        case PLUGIN_TEN_PER_SECOND:        return F("TEN_PER_SECOND      ");
+        case PLUGIN_DEVICE_ADD:            return F("DEVICE_ADD          ");
+        case PLUGIN_EVENTLIST_ADD:         return F("EVENTLIST_ADD       ");
+        case PLUGIN_WEBFORM_SAVE:          return F("WEBFORM_SAVE        ");
+        case PLUGIN_WEBFORM_LOAD:          return F("WEBFORM_LOAD        ");
+        case PLUGIN_WEBFORM_SHOW_VALUES:   return F("WEBFORM_SHOW_VALUES ");
+        case PLUGIN_GET_DEVICENAME:        return F("GET_DEVICENAME      ");
+        case PLUGIN_GET_DEVICEVALUENAMES:  return F("GET_DEVICEVALUENAMES");
+        case PLUGIN_WRITE:                 return F("WRITE               ");
+        case PLUGIN_EVENT_OUT:             return F("EVENT_OUT           ");
+        case PLUGIN_WEBFORM_SHOW_CONFIG:   return F("WEBFORM_SHOW_CONFIG ");
+        case PLUGIN_SERIAL_IN:             return F("SERIAL_IN           ");
+        case PLUGIN_UDP_IN:                return F("UDP_IN              ");
+        case PLUGIN_CLOCK_IN:              return F("CLOCK_IN            ");
+        case PLUGIN_TIMER_IN:              return F("TIMER_IN            ");
+        case PLUGIN_FIFTY_PER_SECOND:      return F("FIFTY_PER_SECOND    ");
+        case PLUGIN_SET_CONFIG:            return F("SET_CONFIG          ");
+        case PLUGIN_GET_DEVICEGPIONAMES:   return F("GET_DEVICEGPIONAMES ");
+        case PLUGIN_EXIT:                  return F("EXIT                ");
+        case PLUGIN_GET_CONFIG:            return F("GET_CONFIG          ");
+        case PLUGIN_UNCONDITIONAL_POLL:    return F("UNCONDITIONAL_POLL  ");
+        case PLUGIN_REQUEST:               return F("REQUEST             ");
+    }
+    return F("Unknown");
+}
+
+bool mustLogFunction(int function) {
+    switch(function) {
+        case PLUGIN_INIT_ALL:              return false;
+        case PLUGIN_INIT:                  return false;
+        case PLUGIN_READ:                  return true;
+        case PLUGIN_ONCE_A_SECOND:         return true;
+        case PLUGIN_TEN_PER_SECOND:        return true;
+        case PLUGIN_DEVICE_ADD:            return false;
+        case PLUGIN_EVENTLIST_ADD:         return false;
+        case PLUGIN_WEBFORM_SAVE:          return false;
+        case PLUGIN_WEBFORM_LOAD:          return false;
+        case PLUGIN_WEBFORM_SHOW_VALUES:   return false;
+        case PLUGIN_GET_DEVICENAME:        return false;
+        case PLUGIN_GET_DEVICEVALUENAMES:  return false;
+        case PLUGIN_WRITE:                 return true;
+        case PLUGIN_EVENT_OUT:             return true;
+        case PLUGIN_WEBFORM_SHOW_CONFIG:   return false;
+        case PLUGIN_SERIAL_IN:             return true;
+        case PLUGIN_UDP_IN:                return true;
+        case PLUGIN_CLOCK_IN:              return false;
+        case PLUGIN_TIMER_IN:              return true;
+        case PLUGIN_FIFTY_PER_SECOND:      return true;
+        case PLUGIN_SET_CONFIG:            return false;
+        case PLUGIN_GET_DEVICEGPIONAMES:   return false;
+        case PLUGIN_EXIT:                  return false;
+        case PLUGIN_GET_CONFIG:            return false;
+        case PLUGIN_UNCONDITIONAL_POLL:    return false;
+        case PLUGIN_REQUEST:               return true;
+    }
+    return false;
+}
+
+std::map<int,TimingStats> pluginStats;
+std::map<int,TimingStats> miscStats;
+unsigned long timediff_calls = 0;
+unsigned long timediff_cpu_cycles_total = 0;
+
+#define LOADFILE_STATS        0
+#define LOOP_STATS            1
+#define PLUGIN_CALL_50PS      2
+#define PLUGIN_CALL_10PS      3
+#define PLUGIN_CALL_10PSU     4
+#define PLUGIN_CALL_1PS       5
+#define SENSOR_SEND_TASK      6
+#define SEND_DATA_STATS       7
+#define COMPUTE_FORMULA_STATS 8
+#define PROC_SYS_TIMER        9
+#define SET_NEW_TIMER        10
+#define TIME_DIFF_COMPUTE    11
+
+
+
+
+
+#define START_TIMER const unsigned statisticsTimerStart(micros());
+#define STOP_TIMER_TASK(T,F)  if (mustLogFunction(F)) pluginStats[T*32 + F].add(usecPassedSince(statisticsTimerStart));
+#define STOP_TIMER_LOADFILE miscStats[LOADFILE_STATS].add(usecPassedSince(statisticsTimerStart));
+#define STOP_TIMER(L)       miscStats[L].add(usecPassedSince(statisticsTimerStart));
+
+
+String getMiscStatsName(int stat) {
+    switch (stat) {
+        case LOADFILE_STATS: return F("Load File");
+        case LOOP_STATS:     return F("Loop");
+        case PLUGIN_CALL_50PS:      return F("Plugin call 50 p/s  ");
+        case PLUGIN_CALL_10PS:      return F("Plugin call 10 p/s  ");
+        case PLUGIN_CALL_10PSU:     return F("Plugin call 10 p/s U");
+        case PLUGIN_CALL_1PS:       return F("Plugin call  1 p/s  ");
+        case SENSOR_SEND_TASK:      return F("SensorSendTask()    ");
+        case SEND_DATA_STATS:       return F("sendData()          ");
+        case COMPUTE_FORMULA_STATS: return F("Compute formula     ");
+        case PROC_SYS_TIMER:        return F("proc_system_timer() ");
+        case SET_NEW_TIMER:         return F("setNewTimerAt()     ");
+        case TIME_DIFF_COMPUTE:     return F("timeDiff()          ");
+    }
+    return F("Unknown");
+}
+
 // These wifi event functions must be in a .h-file because otherwise the preprocessor
 // may not filter the ifdef checks properly.
 // Also the functions use a lot of global defined variables, so include at the end of this file.
 #include "ESPEasyWiFiEvent.h"
+
 
 #endif /* ESPEASY_GLOBALS_H_ */
