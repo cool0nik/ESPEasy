@@ -126,6 +126,7 @@ void processGotIP() {
     initTime();
   }
   mqtt_reconnect_count = 0;
+  MQTTclient_should_reconnect = true;
   timermqtt_interval = 100;
   setIntervalTimer(TIMER_MQTT);
   if (Settings.UseRules)
@@ -417,8 +418,10 @@ void setWifiMode(WiFiMode_t wifimode) {
 String WifiGetAPssid()
 {
   String ssid(Settings.Name);
-  ssid+=F("_");
-  ssid+=Settings.Unit;
+  if (Settings.appendUnitToHostname()) {
+    ssid+=F("_");
+    ssid+=Settings.Unit;
+  }
   return (ssid);
 }
 
@@ -675,6 +678,7 @@ void WifiScan()
 
 String formatScanResult(int i, const String& separator) {
   String result = WiFi.SSID(i);
+  htmlEscape(result);
   #ifndef ESP32
   if (WiFi.isHidden(i)) {
     result += F("#Hidden#");

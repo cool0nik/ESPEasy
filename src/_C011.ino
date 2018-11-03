@@ -16,10 +16,17 @@
 
 struct C011_ConfigStruct
 {
-  char          HttpMethod[C011_HTTP_METHOD_MAX_LEN];
-  char          HttpUri[C011_HTTP_URI_MAX_LEN];
-  char          HttpHeader[C011_HTTP_HEADER_MAX_LEN];
-  char          HttpBody[C011_HTTP_BODY_MAX_LEN];
+  void zero_last() {
+    HttpMethod[C011_HTTP_METHOD_MAX_LEN - 1] = 0;
+    HttpUri[C011_HTTP_URI_MAX_LEN - 1] = 0;
+    HttpHeader[C011_HTTP_HEADER_MAX_LEN - 1] = 0;
+    HttpBody[C011_HTTP_BODY_MAX_LEN - 1] = 0;
+  }
+
+  char          HttpMethod[C011_HTTP_METHOD_MAX_LEN] = {0};
+  char          HttpUri[C011_HTTP_URI_MAX_LEN] = {0};
+  char          HttpHeader[C011_HTTP_HEADER_MAX_LEN] = {0};
+  char          HttpBody[C011_HTTP_BODY_MAX_LEN] = {0};
 };
 
 boolean CPlugin_011(byte function, struct EventStruct *event, String& string)
@@ -52,6 +59,7 @@ boolean CPlugin_011(byte function, struct EventStruct *event, String& string)
         C011_ConfigStruct customConfig;
 
         LoadCustomControllerSettings(event->ControllerIndex,(byte*)&customConfig, sizeof(customConfig));
+        customConfig.zero_last();
         String methods[] = { F("GET"), F("POST"), F("PUT"), F("HEAD"), F("PATCH") };
         string += F("<TR><TD>HTTP Method :<TD><select name='P011httpmethod'>");
         for (byte i = 0; i < 5; i++)
@@ -102,73 +110,60 @@ boolean CPlugin_011(byte function, struct EventStruct *event, String& string)
         strlcpy(customConfig.HttpUri, httpuri.c_str(), sizeof(customConfig.HttpUri));
         strlcpy(customConfig.HttpHeader, httpheader.c_str(), sizeof(customConfig.HttpHeader));
         strlcpy(customConfig.HttpBody, httpbody.c_str(), sizeof(customConfig.HttpBody));
+        customConfig.zero_last();
         SaveCustomControllerSettings(event->ControllerIndex,(byte*)&customConfig, sizeof(customConfig));
         break;
       }
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-      	HTTPSend011(event);
+      	success = Create_schedule_HTTP_C011(event);
+        break;
       }
 
   }
   return success;
 }
 
+//********************************************************************************
+// Generic HTTP request
+//********************************************************************************
+bool do_process_c011_delay_queue(int controller_number, const C011_queue_element& element, ControllerSettingsStruct& ControllerSettings) {
+  WiFiClient client;
+  if (!try_connect_host(controller_number, client, ControllerSettings))
+    return false;
+
+  return send_via_http(controller_number, client, element.txt, ControllerSettings.MustCheckReply);
+}
+
+
 
 //********************************************************************************
-// Generic HTTP get request
+// Create request
 //********************************************************************************
-boolean HTTPSend011(struct EventStruct *event)
+boolean Create_schedule_HTTP_C011(struct EventStruct *event)
 {
+  int controller_number = CPLUGIN_ID_011;
   if (!WiFiConnected(100)) {
     return false;
   }
-  ControllerSettingsStruct ControllerSettings;
-  LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
-
-  String authHeader = "";
-  if ((SecuritySettings.ControllerUser[event->ControllerIndex][0] != 0) && (SecuritySettings.ControllerPassword[event->ControllerIndex][0] != 0))
-  {
-    base64 encoder;
-    String auth = SecuritySettings.ControllerUser[event->ControllerIndex];
-    auth += ":";
-    auth += SecuritySettings.ControllerPassword[event->ControllerIndex];
-    authHeader = F("Authorization: Basic ");
-    authHeader += encoder.encode(auth);
-    authHeader += F(" \r\n");
-  }
+  MakeControllerSettings(ControllerSettings);
+  LoadControllerSettings(event->ControllerIndex, ControllerSettings);
 
   C011_ConfigStruct customConfig;
   LoadCustomControllerSettings(event->ControllerIndex,(byte*)&customConfig, sizeof(customConfig));
+  customConfig.zero_last();
 
-  boolean success = false;
-  addLog(LOG_LEVEL_DEBUG, String(F("HTTP : connecting to "))+
-      ControllerSettings.getHostPortString());
-
-  // Use WiFiClient class to create TCP connections
   WiFiClient client;
-  if (!ControllerSettings.connectToHost(client))
-  {
-    connectionFailures++;
-    addLog(LOG_LEVEL_ERROR, F("HTTP : connection failed"));
+  if (!try_connect_host(controller_number, client, ControllerSettings))
     return false;
-  }
-  statusLED(true);
-  if (connectionFailures)
-    connectionFailures--;
 
-  if (ExtraTaskSettings.TaskDeviceValueNames[0][0] == 0)
+  if (ExtraTaskSettings.TaskIndex != event->TaskIndex)
     PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummyString);
 
-  String payload = String(customConfig.HttpMethod) + " /";
-  payload += customConfig.HttpUri;
-  payload += F(" HTTP/1.1\r\n");
-  payload += F("Host: ");
-  payload += ControllerSettings.getHostPortString();
-  payload += F("\r\n");
-  payload += authHeader;
-  payload += F("Connection: close\r\n");
+  String payload = create_http_request_auth(
+    controller_number, event->ControllerIndex, ControllerSettings,
+    String(customConfig.HttpMethod), customConfig.HttpUri);
 
   if (strlen(customConfig.HttpHeader) > 0)
     payload += customConfig.HttpHeader;
@@ -185,36 +180,9 @@ boolean HTTPSend011(struct EventStruct *event)
   }
   payload += F("\r\n");
 
-  // This will send the request to the server
-  client.print(payload);
-  addLog(LOG_LEVEL_DEBUG_MORE, payload);
-
-  unsigned long timer = millis() + 200;
-  while (!client.available() && !timeOutReached(timer))
-    yield();
-
-  // Read all the lines of the reply from server and print them to Serial
-  while (client.available()) {
-    // String line = client.readStringUntil('\n');
-    String line;
-    safeReadStringUntil(client, line, '\n');
-
-
-    // line.toCharArray(log, 80);
-    addLog(LOG_LEVEL_DEBUG_MORE, line);
-    if (line.startsWith(F("HTTP/1.1 2")))
-    {
-      addLog(LOG_LEVEL_DEBUG, F("HTTP : Success!"));
-      success = true;
-    }
-    yield();
-  }
-  addLog(LOG_LEVEL_DEBUG, F("HTTP : closing connection"));
-
-  client.flush();
-  client.stop();
-
-  return(success);
+  bool success = C011_DelayHandler.addToQueue(C011_queue_element(event->ControllerIndex, payload));
+  scheduleNextDelayQueue(TIMER_C011_DELAY_QUEUE, C011_DelayHandler.getNextScheduleTime());
+  return success;
 }
 
 // parses the string and returns only the the number of name/values we want
@@ -284,4 +252,3 @@ void ReplaceTokenByValue(String& s, struct EventStruct *event)
 }
 
 #endif
-

@@ -31,6 +31,14 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
         break;
       }
 
+    case CPLUGIN_INIT:
+      {
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
+        MQTTDelayHandler.configureControllerSettings(ControllerSettings);
+        break;
+      }
+
     case CPLUGIN_PROTOCOL_TEMPLATE:
       {
         event->String1 = F("/%sysname%/#");
@@ -47,6 +55,7 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
         } else {
           String cmd;
           struct EventStruct TempEvent;
+          TempEvent.TaskIndex = event->TaskIndex;
           bool validTopic = false;
           const int lastindex = event->String1.lastIndexOf('/');
           const String lastPartTopic = event->String1.substring(lastindex + 1);
@@ -83,15 +92,15 @@ boolean CPlugin_005(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-        ControllerSettingsStruct ControllerSettings;
-        LoadControllerSettings(event->ControllerIndex, (byte*)&ControllerSettings, sizeof(ControllerSettings));
+        MakeControllerSettings(ControllerSettings);
+        LoadControllerSettings(event->ControllerIndex, ControllerSettings);
         if (!ControllerSettings.checkHostReachable(true)) {
             success = false;
             break;
         }
         statusLED(true);
 
-        if (ExtraTaskSettings.TaskDeviceValueNames[0][0] == 0)
+        if (ExtraTaskSettings.TaskIndex != event->TaskIndex)
           PluginCall(PLUGIN_GET_DEVICEVALUENAMES, event, dummyString);
 
         String pubname = ControllerSettings.Publish;

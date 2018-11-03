@@ -209,6 +209,7 @@ boolean PubSubClient::connect(const char *id, const char *user, const char *pass
 boolean PubSubClient::readByte(uint8_t * result) {
    uint32_t previousMillis = millis();
    while(!_client->available()) {
+     delay(1);  // Prevent watchdog crashes
      uint32_t currentMillis = millis();
      if(currentMillis - previousMillis >= ((int32_t) MQTT_SOCKET_TIMEOUT * 1000)){
        return false;
@@ -240,6 +241,12 @@ uint16_t PubSubClient::readPacket(uint8_t* lengthLength) {
     uint8_t start = 0;
 
     do {
+        if (len == 6) {
+            // Invalid remaining length encoding - kill the connection
+            _state = MQTT_DISCONNECTED;
+            _client->stop();
+            return 0;
+        }
         if(!readByte(&digit)) return 0;
         buffer[len++] = digit;
         length += (digit & 127) * multiplier;
@@ -306,12 +313,10 @@ boolean PubSubClient::loop() {
                 uint8_t type = buffer[0]&0xF0;
                 if (type == MQTTPUBLISH) {
                     if (callback) {
-                        uint16_t tl = (buffer[llen+1]<<8)+buffer[llen+2];
-                        char topic[tl+1];
-                        for (uint16_t i=0;i<tl;i++) {
-                            topic[i] = buffer[llen+3+i];
-                        }
-                        topic[tl] = 0;
+                        uint16_t tl = (buffer[llen+1]<<8)+buffer[llen+2]; /* topic length in bytes */
+                        memmove(buffer+llen+2,buffer+llen+3,tl); /* move topic inside buffer 1 byte to front */
+                        buffer[llen+2+tl] = 0; /* end the topic as a 'C' string with \x00 */
+                        char *topic = (char*) buffer+llen+2;
                         // msgId only present for QOS>0
                         if ((buffer[0]&0x06) == MQTTQOS1) {
                             msgId = (buffer[llen+3+tl]<<8)+buffer[llen+3+tl+1];
@@ -337,6 +342,9 @@ boolean PubSubClient::loop() {
                 } else if (type == MQTTPINGRESP) {
                     pingOutstanding = false;
                 }
+            } else if (!connected()) {
+                // readPacket has closed the connection
+                return false;
             }
         }
         return true;
@@ -470,7 +478,7 @@ boolean PubSubClient::subscribe(const char* topic) {
 }
 
 boolean PubSubClient::subscribe(const char* topic, uint8_t qos) {
-    if (qos < 0 || qos > 1) {
+    if (qos > 1) {
         return false;
     }
     if (MQTT_MAX_PACKET_SIZE < 9 + strlen(topic)) {
@@ -515,9 +523,12 @@ boolean PubSubClient::unsubscribe(const char* topic) {
 void PubSubClient::disconnect() {
     buffer[0] = MQTTDISCONNECT;
     buffer[1] = 0;
-    _client->write(buffer,2);
+    if (_client != NULL) {
+      _client->write(buffer,2);
+      _client->flush();
+      _client->stop();
+    }
     _state = MQTT_DISCONNECTED;
-    _client->stop();
     lastInActivity = lastOutActivity = millis();
 }
 

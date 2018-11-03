@@ -1063,22 +1063,24 @@ void PluginInit(void)
 }
 
 int getPluginId(byte taskId) {
-  int retry = 1;
-  while (retry >= 0) {
-    int plugin = Task_id_to_Plugin_id[taskId];
-    if (plugin >= 0 && plugin < PLUGIN_MAX) {
-      if (Plugin_id[plugin] == Settings.TaskDeviceNumber[taskId])
-        return plugin;
+  if (taskId < TASKS_MAX) {
+    int retry = 1;
+    while (retry >= 0) {
+      int plugin = Task_id_to_Plugin_id[taskId];
+      if (plugin >= 0 && plugin < PLUGIN_MAX) {
+        if (Plugin_id[plugin] == Settings.TaskDeviceNumber[taskId])
+          return plugin;
+      }
+      updateTaskPluginCache();
+      --retry;
     }
-    updateTaskPluginCache();
-    --retry;
   }
   return -1;
 }
 
 void updateTaskPluginCache() {
-  ++countFindPluginId;
-  Task_id_to_Plugin_id.resize(TASKS_MAX +1);
+  ++countFindPluginId; // Used for statistics.
+  Task_id_to_Plugin_id.resize(TASKS_MAX);
   for (byte y = 0; y < TASKS_MAX; ++y) {
     Task_id_to_Plugin_id[y] = -1;
     bool foundPlugin = false;
@@ -1111,6 +1113,15 @@ byte PluginCall(byte Function, struct EventStruct *event, String& str)
     case PLUGIN_UNCONDITIONAL_POLL:
       for (byte x = 0; x < PLUGIN_MAX; x++) {
         if (Plugin_id[x] != 0){
+          if (Function == PLUGIN_DEVICE_ADD) {
+            const unsigned int next_DeviceIndex = deviceCount + 2;
+            if (next_DeviceIndex > Device.size()) {
+              // Increase with 16 to get some compromise between number of resizes and wasted space
+              unsigned int newSize = Device.size();
+              newSize = newSize + 16 - (newSize % 16);
+              Device.resize(newSize);
+            }
+          }
           START_TIMER;
           Plugin_ptr[x](Function, event, str);
           STOP_TIMER_TASK(x,Function);
@@ -1188,6 +1199,7 @@ byte PluginCall(byte Function, struct EventStruct *event, String& str)
     case PLUGIN_INIT_ALL:
     case PLUGIN_CLOCK_IN:
     case PLUGIN_EVENT_OUT:
+    case PLUGIN_TIME_CHANGE:
       {
         if (Function == PLUGIN_INIT_ALL)
           Function = PLUGIN_INIT;
@@ -1241,11 +1253,10 @@ byte PluginCall(byte Function, struct EventStruct *event, String& str)
             // Schedule the plugin to be read.
             schedule_task_device_timer_at_init(event->TaskIndex);
           }
-          if (Function != PLUGIN_GET_DEVICEVALUENAMES) {
+          if (ExtraTaskSettings.TaskIndex != event->TaskIndex) {
             // LoadTaskSettings may call PLUGIN_GET_DEVICEVALUENAMES.
             LoadTaskSettings(event->TaskIndex);
           }
-
           event->BaseVarIndex = event->TaskIndex * VARS_PER_TASK;
           checkRAM(F("PluginCall_init"),x);
           START_TIMER;

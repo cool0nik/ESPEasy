@@ -73,6 +73,12 @@ String formatToHex(unsigned long value) {
 }
 
 String formatHumanReadable(unsigned long value, unsigned long factor) {
+  String result = formatHumanReadable(value, factor, 2);
+  result.replace(F(".00"), "");
+  return result;
+}
+
+String formatHumanReadable(unsigned long value, unsigned long factor, int NrDecimals) {
   float floatValue(value);
   byte steps = 0;
   while (value >= factor) {
@@ -80,7 +86,7 @@ String formatHumanReadable(unsigned long value, unsigned long factor) {
     ++steps;
     floatValue /= float(factor);
   }
-  String result = toString(floatValue, 2);
+  String result = toString(floatValue, NrDecimals);
   switch (steps) {
     case 0: return String(value);
     case 1: result += 'k'; break;
@@ -125,7 +131,7 @@ String toString(float value, byte decimals)
 
 String toString(WiFiMode_t mode)
 {
-  String result = F("Undefinited");
+  String result = F("Undefined");
   switch (mode)
   {
     case WIFI_OFF:
@@ -146,6 +152,10 @@ String toString(WiFiMode_t mode)
   return result;
 }
 
+String toString(bool value) {
+  return value ? F("true") : F("false");
+}
+
 /*********************************************************************************************\
    Format a value to the set number of decimals
   \*********************************************************************************************/
@@ -155,11 +165,13 @@ String doFormatUserVar(byte TaskIndex, byte rel_index, bool mustCheck, bool& isv
   const byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[TaskIndex]);
   if (Device[DeviceIndex].ValueCount <= rel_index) {
     isvalid = false;
-    String log = F("No sensor value for TaskIndex: ");
-    log += TaskIndex;
-    log += F(" varnumber: ");
-    log += rel_index;
-    addLog(LOG_LEVEL_ERROR, log);
+    if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
+      String log = F("No sensor value for TaskIndex: ");
+      log += TaskIndex;
+      log += F(" varnumber: ");
+      log += rel_index;
+      addLog(LOG_LEVEL_ERROR, log);
+    }
     return "";
   }
   if (Device[DeviceIndex].VType == SENSOR_TYPE_LONG) {
@@ -168,11 +180,13 @@ String doFormatUserVar(byte TaskIndex, byte rel_index, bool mustCheck, bool& isv
   float f(UserVar[BaseVarIndex + rel_index]);
   if (mustCheck && !isValidFloat(f)) {
     isvalid = false;
-    String log = F("Invalid float value for TaskIndex: ");
-    log += TaskIndex;
-    log += F(" varnumber: ");
-    log += rel_index;
-    addLog(LOG_LEVEL_DEBUG, log);
+    if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+      String log = F("Invalid float value for TaskIndex: ");
+      log += TaskIndex;
+      log += F(" varnumber: ");
+      log += rel_index;
+      addLog(LOG_LEVEL_DEBUG, log);
+    }
     f = 0;
   }
   return toString(f, ExtraTaskSettings.TaskDeviceValueDecimals[rel_index]);
@@ -200,13 +214,11 @@ String formatUserVar(struct EventStruct *event, byte rel_index, bool& isvalid)
 /*********************************************************************************************\
    Wrap a string with given pre- and postfix string.
   \*********************************************************************************************/
-String wrap_String(const String& string, const String& wrap) {
-  String result;
-  result.reserve(string.length() + 2* wrap.length());
-  result = wrap;
+
+void wrap_String(const String& string, const String& wrap, String& result) {
+  result += wrap;
   result += string;
   result += wrap;
-  return result;
 }
 
 /*********************************************************************************************\
@@ -215,19 +227,25 @@ String wrap_String(const String& string, const String& wrap) {
 String to_json_object_value(const String& object, const String& value) {
   String result;
   result.reserve(object.length() + value.length() + 6);
-  result = wrap_String(object, F("\""));
+  wrap_String(object, F("\""), result);
   result += F(":");
-  if (value.length() == 0 || !isFloat(value)) {
-    if (value.indexOf('\n') == -1 && value.indexOf('"') == -1 && value.indexOf(F("Pragma")) == -1) {
-      result += wrap_String(value, F("\""));
-    } else {
+  if (value.length() == 0) {
+    // Empty string
+    result += F("\"\"");
+  } else if (!isFloat(value)) {
+    // Is not a numerical value, thus wrap with quotes
+    if (value.indexOf('\n') != -1 || value.indexOf('\r') != -1 || value.indexOf('"') != -1) {
+      // Must replace characters, so make a deepcopy
       String tmpValue(value);
       tmpValue.replace('\n', '^');
+      tmpValue.replace('\r', '^');
       tmpValue.replace('"', '\'');
-      tmpValue.replace(F("Pragma"), F("Bugje!"));
-      result += wrap_String(tmpValue, F("\""));
+      wrap_String(tmpValue, F("\""), result);
+    } else {
+      wrap_String(value, F("\""), result);
     }
   } else {
+    // It is a numerical
     result += value;
   }
   return result;
@@ -268,6 +286,26 @@ String stripQuotes(const String& text) {
     }
   }
   return text;
+}
+
+bool safe_strncpy(char* dest, const String& source, size_t max_size) {
+  return safe_strncpy(dest, source.c_str(), max_size);
+}
+
+bool safe_strncpy(char* dest, const char* source, size_t max_size) {
+  if (max_size < 1) return false;
+  if (dest == NULL) return false;
+  if (source == NULL) return false;
+  bool result = true;
+  memset(dest, 0, max_size);
+  size_t str_length = strlen(source);
+  if (str_length >= max_size) {
+    str_length = max_size;
+    result = false;
+  }
+  strncpy(dest, source, str_length);
+  dest[max_size - 1] = 0;
+  return result;
 }
 
 /*********************************************************************************************\
@@ -363,7 +401,31 @@ void htmlEscape(String & html)
   html.replace("'",  F("&#039;"));
   html.replace("<",  F("&lt;"));
   html.replace(">",  F("&gt;"));
+  html.replace("/", F("&#047;"));
 }
+
+void htmlStrongEscape(String & html)
+{
+  String escaped;
+  escaped.reserve(html.length());
+  for (unsigned i = 0; i < html.length(); ++i)
+  {
+    if ((html[i] >= 'a' && html[i] <= 'z') || (html[i] >= 'A' && html[i] <= 'Z') || (html[i] >= '0' && html[i] <= '9'))
+    {
+      escaped += html[i];
+    }
+    else
+    {
+      char s [4];
+      sprintf(s, "%03d", static_cast<int>(html[i]));
+      escaped += "&#";
+      escaped += s;
+      escaped += ";";
+    }
+  }
+  html = escaped;
+}
+
 
 /********************************************************************************************\
   replace other system variables like %sysname%, %systime%, %ip%
@@ -498,21 +560,32 @@ void parseSystemVariables(String& s, boolean useURLencode)
     SMART_REPL(F("%systm_hm_am%"), getTimeString_ampm(':', false))
     SMART_REPL(F("%systime%"), getTimeString(':'))
     SMART_REPL(F("%systime_am%"), getTimeString_ampm(':'))
+    SMART_REPL(F("%sysbuild_date%"), String(CRCValues.compileDate))
+    SMART_REPL(F("%sysbuild_time%"), String(CRCValues.compileTime))
     repl(F("%sysname%"), Settings.Name, s, useURLencode);
 
     // valueString is being used by the macro.
     char valueString[5];
     #define SMART_REPL_TIME(T,F,V) if (s.indexOf(T) != -1) { sprintf_P(valueString, (F), (V)); repl((T),valueString, s, useURLencode);}
-    SMART_REPL_TIME(F("%syshour%"), PSTR("%02d"), hour())
-    SMART_REPL_TIME(F("%sysmin%"), PSTR("%02d"), minute())
-    SMART_REPL_TIME(F("%syssec%"),PSTR("%02d"), second())
+    SMART_REPL_TIME(F("%sysyear%"), PSTR("%d"), year())
+    SMART_REPL_TIME(F("%sysmonth%"),PSTR("%d"), month())
+    SMART_REPL_TIME(F("%sysday%"), PSTR("%d"), day())
+    SMART_REPL_TIME(F("%syshour%"), PSTR("%d"), hour())
+    SMART_REPL_TIME(F("%sysmin%"), PSTR("%d"), minute())
+    SMART_REPL_TIME(F("%syssec%"),PSTR("%d"), second())
     SMART_REPL_TIME(F("%syssec_d%"),PSTR("%d"), ((hour()*60) + minute())*60 + second());
-    SMART_REPL_TIME(F("%sysday%"), PSTR("%02d"), day())
-    SMART_REPL_TIME(F("%sysmonth%"),PSTR("%02d"), month())
-    SMART_REPL_TIME(F("%sysyear%"), PSTR("%04d"), year())
-    SMART_REPL_TIME(F("%sysyears%"),PSTR("%02d"), year()%100)
     SMART_REPL(F("%sysweekday%"), String(weekday()))
     SMART_REPL(F("%sysweekday_s%"), weekday_str())
+
+    // With leading zero
+    SMART_REPL_TIME(F("%sysyears%"),PSTR("%02d"), year()%100)
+    SMART_REPL_TIME(F("%sysyear_0%"), PSTR("%04d"), year())
+    SMART_REPL_TIME(F("%syshour_0%"), PSTR("%02d"), hour())
+    SMART_REPL_TIME(F("%sysday_0%"), PSTR("%02d"), day())
+    SMART_REPL_TIME(F("%sysmin_0%"), PSTR("%02d"), minute())
+    SMART_REPL_TIME(F("%syssec_0%"),PSTR("%02d"), second())
+    SMART_REPL_TIME(F("%sysmonth_0%"),PSTR("%02d"), month())
+
     #undef SMART_REPL_TIME
   }
   SMART_REPL(F("%lcltime%"), getDateTimeString('-',':',' '))
@@ -522,13 +595,19 @@ void parseSystemVariables(String& s, boolean useURLencode)
   SMART_REPL_T(F("%sunset"), replSunSetTimeString)
   SMART_REPL_T(F("%sunrise"), replSunRiseTimeString)
 
-  // FIXME TD-er: Must make sure LoadTaskSettings has been performed before this is called.
-  repl(F("%tskname%"), ExtraTaskSettings.TaskDeviceName, s, useURLencode);
-  if (s.indexOf(F("%vname")) != -1) {
-    repl(F("%vname1%"), ExtraTaskSettings.TaskDeviceValueNames[0], s, useURLencode);
-    repl(F("%vname2%"), ExtraTaskSettings.TaskDeviceValueNames[1], s, useURLencode);
-    repl(F("%vname3%"), ExtraTaskSettings.TaskDeviceValueNames[2], s, useURLencode);
-    repl(F("%vname4%"), ExtraTaskSettings.TaskDeviceValueNames[3], s, useURLencode);
+  if (s.indexOf(F("%is")) != -1) {
+    SMART_REPL(F("%ismqtt%"), String(MQTTclient_connected));
+    SMART_REPL(F("%iswifi%"), String(wifiStatus)); //0=disconnected, 1=connected, 2=got ip, 3=services initialized
+    SMART_REPL(F("%isntp%"), String(statusNTPInitialized));
+    #ifdef USES_P037
+    SMART_REPL(F("%ismqttimp%"), String(P037_MQTTImport_connected));
+    #endif // USES_P037
+  }
+  const int v_index = s.indexOf("%v");
+  if (v_index != -1 && isDigit(s[v_index+2])) {
+    for (byte i = 0; i < CUSTOM_VARS_MAX; ++i) {
+      SMART_REPL("%v"+toString(i+1,0)+'%', String(customFloatVar[i]))
+    }
   }
 }
 
@@ -536,11 +615,13 @@ String getReplacementString(const String& format, String& s) {
   int startpos = s.indexOf(format);
   int endpos = s.indexOf('%', startpos + 1);
   String R = s.substring(startpos, endpos + 1);
-  String log = F("ReplacementString SunTime: ");
-  log += R;
-  log += F(" offset: ");
-  log += getSecOffset(R);
-  addLog(LOG_LEVEL_DEBUG, log);
+  if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+    String log = F("ReplacementString SunTime: ");
+    log += R;
+    log += F(" offset: ");
+    log += getSecOffset(R);
+    addLog(LOG_LEVEL_DEBUG, log);
+  }
   return R;
 }
 
@@ -556,6 +637,8 @@ void replSunSetTimeString(const String& format, String& s, boolean useURLencode)
 
 void parseEventVariables(String& s, struct EventStruct *event, boolean useURLencode)
 {
+  // These replacements use ExtraTaskSettings, so make sure the correct TaskIndex is set in the event.
+  LoadTaskSettings(event->TaskIndex);
   SMART_REPL(F("%id%"), String(event->idx))
   if (s.indexOf(F("%val")) != -1) {
     if (event->sensorType == SENSOR_TYPE_LONG) {
@@ -567,11 +650,47 @@ void parseEventVariables(String& s, struct EventStruct *event, boolean useURLenc
       SMART_REPL(F("%val4%"), formatUserVarNoCheck(event, 3))
     }
   }
+  // FIXME TD-er: Must make sure LoadTaskSettings has been performed before this is called.
+  repl(F("%tskname%"), ExtraTaskSettings.TaskDeviceName, s, useURLencode);
+  if (s.indexOf(F("%vname")) != -1) {
+    repl(F("%vname1%"), ExtraTaskSettings.TaskDeviceValueNames[0], s, useURLencode);
+    repl(F("%vname2%"), ExtraTaskSettings.TaskDeviceValueNames[1], s, useURLencode);
+    repl(F("%vname3%"), ExtraTaskSettings.TaskDeviceValueNames[2], s, useURLencode);
+    repl(F("%vname4%"), ExtraTaskSettings.TaskDeviceValueNames[3], s, useURLencode);
+  }
+
 }
 #undef SMART_REPL_T
 #undef SMART_REPL
 
 bool getConvertArgument(const String& marker, const String& s, float& argument, int& startIndex, int& endIndex) {
+  String argumentString;
+  if (getConvertArgumentString(marker, s, argumentString, startIndex, endIndex)) {
+    if (!isFloat(argumentString)) return false;
+    argument = argumentString.toFloat();
+    return true;
+  }
+  return false;
+}
+
+bool getConvertArgument2(const String& marker, const String& s, float& arg1, float& arg2, int& startIndex, int& endIndex) {
+  String argumentString;
+  if (getConvertArgumentString(marker, s, argumentString, startIndex, endIndex)) {
+    int pos_comma = argumentString.indexOf(',');
+    if (pos_comma == -1) return false;
+    String arg1_s = argumentString.substring(0, pos_comma);
+    if (!isFloat(arg1_s)) return false;
+    String arg2_s = argumentString.substring(pos_comma+1);
+    if (!isFloat(arg2_s)) return false;
+    arg1 = arg1_s.toFloat();
+    arg2 = arg2_s.toFloat();
+    return true;
+  }
+  return false;
+}
+
+
+bool getConvertArgumentString(const String& marker, const String& s, String& argumentString, int& startIndex, int& endIndex) {
   startIndex = s.indexOf(marker);
   if (startIndex == -1) return false;
 
@@ -583,10 +702,8 @@ bool getConvertArgument(const String& marker, const String& s, float& argument, 
   endIndex = s.indexOf(')', startIndexArgument);
   if (endIndex == -1) return false;
 
-  String argumentString = s.substring(startIndexArgument, endIndex);
-  if (argumentString.length() == 0 || !isFloat(argumentString)) return false;
-
-  argument = argumentString.toFloat();
+  argumentString = s.substring(startIndexArgument, endIndex);
+  if (argumentString.length() == 0) return false;
   ++endIndex; // Must also strip ')' from the original string.
   return true;
 }
@@ -597,21 +714,26 @@ void parseStandardConversions(String& s, boolean useURLencode) {
   if (s.indexOf(F("%c_")) == -1)
     return; // Nothing to replace
 
-  float arg = 0.0;
+  float arg1 = 0.0;
   int startIndex = 0;
   int endIndex = 0;
   // These replacements should be done in a while loop per marker,
   // since they also replace the numerical parameter.
   // The marker may occur more than once per string, but with different parameters.
-  #define SMART_CONV(T,FUN) while (getConvertArgument((T), s, arg, startIndex, endIndex)) { repl(s.substring(startIndex, endIndex), (FUN), s, useURLencode); }
-  SMART_CONV(F("%c_w_dir%"),  getBearing(arg))
-  SMART_CONV(F("%c_c2f%"),    toString(CelsiusToFahrenheit(arg), 1))
-  SMART_CONV(F("%c_ms2Bft%"), String(m_secToBeaufort(arg)))
-  SMART_CONV(F("%c_cm2imp%"), centimeterToImperialLength(arg))
-  SMART_CONV(F("%c_mm2imp%"), millimeterToImperialLength(arg))
-  SMART_CONV(F("%c_m2day%"),  toString(minutesToDay(arg), 2))
-  SMART_CONV(F("%c_m2dh%"),   minutesToDayHour(arg))
-  SMART_CONV(F("%c_m2dhm%"),  minutesToDayHourMinute(arg))
-  SMART_CONV(F("%c_s2dhms%"), secondsToDayHourMinuteSecond(arg))
+  #define SMART_CONV(T,FUN) while (getConvertArgument((T), s, arg1, startIndex, endIndex)) { repl(s.substring(startIndex, endIndex), (FUN), s, useURLencode); }
+  SMART_CONV(F("%c_w_dir%"),  getBearing(arg1))
+  SMART_CONV(F("%c_c2f%"),    toString(CelsiusToFahrenheit(arg1), 2))
+  SMART_CONV(F("%c_ms2Bft%"), String(m_secToBeaufort(arg1)))
+  SMART_CONV(F("%c_cm2imp%"), centimeterToImperialLength(arg1))
+  SMART_CONV(F("%c_mm2imp%"), millimeterToImperialLength(arg1))
+  SMART_CONV(F("%c_m2day%"),  toString(minutesToDay(arg1), 2))
+  SMART_CONV(F("%c_m2dh%"),   minutesToDayHour(arg1))
+  SMART_CONV(F("%c_m2dhm%"),  minutesToDayHourMinute(arg1))
+  SMART_CONV(F("%c_s2dhms%"), secondsToDayHourMinuteSecond(arg1))
+  #undef SMART_CONV
+  // Conversions with 2 parameters
+  #define SMART_CONV(T,FUN) while (getConvertArgument2((T), s, arg1, arg2, startIndex, endIndex)) { repl(s.substring(startIndex, endIndex), (FUN), s, useURLencode); }
+  float arg2 = 0.0;
+  SMART_CONV(F("%c_dew_th%"), toString(compute_dew_point_temp(arg1, arg2), 2))
   #undef SMART_CONV
 }

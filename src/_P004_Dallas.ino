@@ -90,7 +90,7 @@ boolean Plugin_004(byte function, struct EventStruct * event, String& string)
                   resolutionChoice = Plugin_004_DS_getResolution(savedAddress);
               else
                   resolutionChoice = 9;
-              String resultsOptions[4] = { "9", "10", "11", "12" };
+              String resultsOptions[4] = { F("9"), F("10"), F("11"), F("12") };
               int resultsOptionValues[4] = { 9, 10, 11, 12 };
               addFormSelector(F("Device Resolution"), F("plugin_004_res"), 4, resultsOptions, resultsOptionValues, resolutionChoice);
               addHtml(F(" Bit"));
@@ -105,7 +105,6 @@ boolean Plugin_004(byte function, struct EventStruct * event, String& string)
 
             // save the address for selected device and store into extra tasksettings
             Plugin_004_DallasPin = Settings.TaskDevicePin1[event->TaskIndex];
-            // byte devCount =
             if (Plugin_004_DallasPin != -1){
               Plugin_004_DS_scan(getFormItemInt(F("plugin_004_dev")), addr);
               for (byte x = 0; x < 8; x++)
@@ -124,11 +123,12 @@ boolean Plugin_004(byte function, struct EventStruct * event, String& string)
             {
                 if (x != 0)
                     string += "-";
-                // string += String(ExtraTaskSettings.TaskDevicePluginConfigLong[x], HEX);
+                string += String(ExtraTaskSettings.TaskDevicePluginConfigLong[x], HEX);
             }
             success = true;
             break;
         }
+
         case PLUGIN_INIT:
         {
             Plugin_004_DallasPin = Settings.TaskDevicePin1[event->TaskIndex];
@@ -169,7 +169,7 @@ boolean Plugin_004(byte function, struct EventStruct * event, String& string)
                 for (byte x = 0; x < 8; x++)
                 {
                     if (x != 0)
-                        log += "-";
+                        log += '-';
                     log += String(ExtraTaskSettings.TaskDevicePluginConfigLong[x], HEX);
                 }
 
@@ -244,8 +244,25 @@ boolean Plugin_004_DS_readTemp(uint8_t ROM[8], float * value)
 
     for (byte i = 0; i < 9; i++) // read 9 bytes
         ScratchPad[i] = Plugin_004_DS_read();
+    
+    bool crc_ok = Plugin_004_DS_crc8(ScratchPad);
 
-    if (!Plugin_004_DS_crc8(ScratchPad))
+    if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
+        String log = F("DS: SP: ");
+
+        for (byte x = 0; x < 9; x++)
+        {
+            if (x != 0)
+                log += ',';
+            log += String(ScratchPad[x], HEX);
+        }
+
+        if (crc_ok)
+            log += F(",OK");
+        addLog(LOG_LEVEL_DEBUG, log);
+    }
+
+    if (!crc_ok)
     {
         *value = 0;
         return false;
@@ -397,11 +414,11 @@ uint8_t Plugin_004_DS_reset()
     while (!digitalRead(Plugin_004_DallasPin));
 
     pinMode(Plugin_004_DallasPin, OUTPUT); digitalWrite(Plugin_004_DallasPin, LOW);
-    delayMicroseconds(492);               // Dallas spec. = Min. 480uSec. Arduino 500uSec.
+    delayMicroseconds(480);               // Dallas spec. = Min. 480uSec. Arduino 500uSec.
     pinMode(Plugin_004_DallasPin, INPUT); // Float
-    delayMicroseconds(40);
+    delayMicroseconds(70);
     r = !digitalRead(Plugin_004_DallasPin);
-    delayMicroseconds(420);
+    delayMicroseconds(410);
     #if defined(ESP32)
       ESP32interrupts();
     #endif
