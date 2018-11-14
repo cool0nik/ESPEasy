@@ -15,7 +15,7 @@
 /*
   Main reason to have slow PWN.... Sometimes we need to works with AC.
   You need to get a part of period/search zero/... to make able power regulation on AC.... 
-  or (for slow device/heaters) control of series of periods.
+  or (for slow device/heaters) control of series of periods (triac)
   
   So I use 1 sec as base frequency for PWM in this plugin. You can switch it to 1/10 sec as you wish.
   Of course you should understand the consequences.
@@ -153,7 +153,7 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
       addFormCheckBox(F("Invert output"), F("plugin_218_invert_output"), GET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218));
       addFormCheckBox(F("use 1/10s period"),  F("plugin_218_tenth"), GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218));
       
-      //after the form has been loaded, set success and break
+      LoadTaskSettings(event->TaskIndex);
       success = true;
       break;
     }
