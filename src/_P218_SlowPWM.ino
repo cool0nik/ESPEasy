@@ -1,12 +1,14 @@
+#define USES_P218
 #ifdef USES_P218
+//#######################################################################################################
+//#################################### Plugin 218: PWM Power Control ####################################
+//#######################################################################################################
 #define PLUGIN_218
 #define PLUGIN_ID_218        218
 #define PLUGIN_NAME_218      "Regulator - Slow/Soft PWM [TESTING]"
 
 #define PLUGIN_VALUENAME1_218 "Output"
 
-
-#define PLUGINT_DEFAULT_PERIOD_218 1024
 #define PLUGINT_MAX_PERIOD_218 30000
 #define PLUGINT_MIN_PERIOD_218 4
 
@@ -59,17 +61,15 @@ inline int16_t * GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(T event, int16_t id)
   return reinterpret_cast<int16_t*>(GET_USER_FLOAT_POINTER_218(event, id));
 }
 
-//#define GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(event, id) ((int16_t *)(reinterpret_cast<int16_t*>(GET_USER_FLOAT_POINTER_218(event, id))))
 #define GET_LOW_HALF_FLOAT_AS_INT_POINTER_218(event, id)  (&(GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(event, id)[1]))
 
 // config int
 #define PLUGIN_CONTROLLED_ID_218       0
 #define PLUGIN_CONTROLLED_VAR_ID_218   1
 #define PLUGIN_PERIOD_218              2
-//#define PLUGIN_FLAGS_218               3
 
 // flag id (checkbox)
-#define FAST_PWM_ID_218                0
+// #define FAST_PWM_ID_218                0
 #define INVERT_OUTPTUT_218             1
 
 // user var
@@ -92,9 +92,6 @@ inline int16_t * GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(T event, int16_t id)
 #define GET_PWM_PREVIOUS_VALUE_POINTER_218(event)     (GET_LOW_HALF_FLOAT_AS_INT_POINTER_218(event, PLUGIN_PACKED_INT34_218))
 #define GET_PWM_CUR_SATE_SHOW_POINTER_218(event)      (GET_USER_FLOAT_POINTER_218(event, PLUGIN_SHOW_STATE_218))
 
-//#define GET_PLUGIN_FLAG_POINTER_218(event)            (&(GET_CONFIG_INT_218(event, PLUGIN_FLAGS_218)))
-//#define GET_PLUGIN_FLAG_218(event, mask)              (((*GET_PLUGIN_FLAG_POINTER_218(event)) & (1 << mask)) != 0)
-//#define SET_PLUGIN_FLAG_218(event, mask, data)        (data == 0 ? ((*GET_PLUGIN_FLAG_POINTER_218(event)) &= ~(1 << mask)) : ((*GET_PLUGIN_FLAG_POINTER_218(event)) |= (1 << mask)))
 #define GET_PLUGIN_FLAG_218(event, mask)              (Settings.TaskDevicePluginConfigLong[event->TaskIndex][mask] != 0)
 #define SET_PLUGIN_FLAG_218(event, mask, data)        (Settings.TaskDevicePluginConfigLong[event->TaskIndex][mask] = data)
 
@@ -134,25 +131,32 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
       break;
     }
 
+    case PLUGIN_GET_DEVICEGPIONAMES:
+    {
+      event->String1 = formatGpioName_output(F("PWM"));
+      break;
+    }
+
     case PLUGIN_WEBFORM_LOAD:
     {
       addHtml(F("<TR><TD>Check Task:<TD>"));
-      addTaskSelect(F("plugin_218_task"), GET_CONTROLLED_TASK_218(event));
+      addTaskSelect(F("p218_task"), GET_CONTROLLED_TASK_218(event));
 
       LoadTaskSettings(GET_CONTROLLED_TASK_218(event)); // we need to load the values from another task for selection!
       addHtml(F("<TR><TD>Check Value:<TD>"));
-      addTaskValueSelect(F("plugin_218_value"), GET_CONTROLLED_TASK_VAR_ID_218(event), GET_CONTROLLED_TASK_218(event));
+      addTaskValueSelect(F("p218_value"), GET_CONTROLLED_TASK_VAR_ID_218(event), GET_CONTROLLED_TASK_218(event));
 
       addFormNumericBox(F("Set Period"),
-        F("plugin_218_period"), 
+        F("p218_period"), 
         p218_normolize_value(GET_PERIOD_218(event), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218),
         PLUGINT_MIN_PERIOD_218,
         PLUGINT_MAX_PERIOD_218
       );
 
-      addFormCheckBox(F("Invert output"), F("plugin_218_invert_output"), GET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218));
-      addFormCheckBox(F("use 1/10s period"),  F("plugin_218_tenth"), GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218));
-      
+      addFormCheckBox(F("Invert output"), F("p218_invert"), GET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218));
+#ifdef FAST_PWM_ID_218
+      addFormCheckBox(F("use 1/10s period"),  F("p218_tenth"), GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218));
+#endif      
       LoadTaskSettings(event->TaskIndex);
       success = true;
       break;
@@ -160,13 +164,14 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
-      SET_CONTROLLED_TASK_218(event, getFormItemInt(F("plugin_218_task")));
-      SET_CONTROLLED_TASK_VAR_ID_218(event, getFormItemInt(F("plugin_218_value")));
-      SET_PERIOD_218(event, p218_normolize_value(getFormItemInt(F("plugin_218_period")), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218));
+      SET_CONTROLLED_TASK_218(event, getFormItemInt(F("p218_task")));
+      SET_CONTROLLED_TASK_VAR_ID_218(event, getFormItemInt(F("p218_value")));
+      SET_PERIOD_218(event, p218_normolize_value(getFormItemInt(F("p218_period")), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218));
 
-      SET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218, isFormItemChecked(F("plugin_218_invert_output")));
-      SET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218, isFormItemChecked(F("plugin_218_tenth")));
-
+      SET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218, isFormItemChecked(F("p218_invert")));
+#ifdef FAST_PWM_ID_218
+      SET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218, isFormItemChecked(F("p218_tenth")));
+#endif
       p218_init_settings(event);
       
       success = true;
@@ -188,7 +193,7 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
 	    break;
 
 	  }
-
+#ifdef FAST_PWM_ID_218
     case PLUGIN_TEN_PER_SECOND:
     {
       if (GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218)) {
@@ -197,11 +202,14 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
       success = true;
       break;
     }
-
+#endif
 
     case PLUGIN_ONCE_A_SECOND:
     {
-      if (!GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218)) {
+#ifdef FAST_PWM_ID_218
+      if (!GET_PLUGIN_FLAG_218(event, FAST_PWM_ID_218))
+#endif
+      {
         p218_next_step(event);
       }
       success = true;
