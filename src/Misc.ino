@@ -144,6 +144,11 @@ void deepSleep(int delay)
   if (lastBootCause!=BOOT_CAUSE_DEEP_SLEEP)
   {
     addLog(LOG_LEVEL_INFO, F("SLEEP: Entering deep sleep in 30 seconds."));
+    if (Settings.UseRules && isDeepSleepEnabled())
+      {
+        String event = F("System#NoSleep=30");
+        rulesProcessing(event);
+      }
     delayBackground(30000);
     //disabled?
     if (!isDeepSleepEnabled())
@@ -221,7 +226,69 @@ int8_t getTaskIndexByName(String TaskNameSearch)
   return -1;
 }
 
+/*********************************************************************************************\
+   Device GPIO name functions to share flash strings
+  \*********************************************************************************************/
+String formatGpioName(const String& label, gpio_direction direction, bool optional) {
+  int reserveLength = 5 /* "GPIO " */ + 8 /* "&#8644; " */ + label.length();
+  if (optional) {
+    reserveLength += 11;
+  }
+  String result;
+  result.reserve(reserveLength);
+  result += F("GPIO ");
+  switch (direction) {
+    case gpio_input:         result += F("&larr; "); break;
+    case gpio_output:        result += F("&rarr; "); break;
+    case gpio_bidirectional: result += F("&#8644; "); break;
+  }
+  result += label;
+  if (optional)
+    result += F("(optional)");
+  return result;
+}
 
+String formatGpioName(const String& label, gpio_direction direction) {
+  return formatGpioName(label, direction, false);
+}
+
+String formatGpioName_input(const String& label) {
+  return formatGpioName(label, gpio_input, false);
+}
+
+String formatGpioName_output(const String& label) {
+  return formatGpioName(label, gpio_output, false);
+}
+
+String formatGpioName_bidirectional(const String& label) {
+  return formatGpioName(label, gpio_bidirectional, false);
+}
+
+String formatGpioName_input_optional(const String& label) {
+  return formatGpioName(label, gpio_input, true);
+}
+
+String formatGpioName_output_optional(const String& label) {
+  return formatGpioName(label, gpio_output, true);
+}
+
+// RX/TX are the only signals which are crossed, so they must be labelled like this:
+// "GPIO <-- TX" and "GPIO --> RX"
+String formatGpioName_TX(bool optional) {
+  return formatGpioName("RX", gpio_output, optional);
+}
+
+String formatGpioName_RX(bool optional) {
+  return formatGpioName("TX", gpio_input, optional);
+}
+
+String formatGpioName_TX_HW(bool optional) {
+  return formatGpioName("RX (HW)", gpio_output, optional);
+}
+
+String formatGpioName_RX_HW(bool optional) {
+  return formatGpioName("TX (HW)", gpio_input, optional);
+}
 
 /*********************************************************************************************\
    set pin mode & state (info table)
@@ -388,7 +455,7 @@ void statusLED(boolean traffic)
   else
   {
 
-    if (wifiStatus == ESPEASY_WIFI_SERVICES_INITIALIZED)
+    if (WiFiConnected())
     {
       long int delta = timePassedSince(gnLastUpdate);
       if (delta>0 || delta<0 )
@@ -691,7 +758,7 @@ uint32_t progMemMD5check(){
       addLog(LOG_LEVEL_INFO, F("CRC  : program checksum       ...OK"));
       return CRCValues.numberOfCRCBytes;
    }
-   addLog(LOG_LEVEL_INFO,    F("CRC  : program checksum       ...FAIL"));
+   addLog(LOG_LEVEL_INFO, F("CRC  : program checksum       ...FAIL"));
    return 0;
 }
 
@@ -709,10 +776,13 @@ String getTaskDeviceName(byte TaskIndex) {
   \*********************************************************************************************/
 void ResetFactory(void)
 {
+  const GpioFactorySettingsStruct gpio_settings(ResetFactoryDefaultPreference.getDeviceModel());
 
   checkRAM(F("ResetFactory"));
   // Direct Serial is allowed here, since this is only an emergency task.
-  Serial.println(F("RESET: Resetting factory defaults..."));
+  Serial.print(F("RESET: Resetting factory defaults... using "));
+  Serial.print(getDeviceModelString(ResetFactoryDefaultPreference.getDeviceModel()));
+  Serial.println(F(" settings"));
   delay(1000);
   if (readFromRTC())
   {
@@ -728,6 +798,7 @@ void ResetFactory(void)
   {
     Serial.println(F("RESET: Cold boot"));
     initRTC();
+    // TODO TD-er: Store set device model in RTC.
   }
 
   RTC.flashCounter=0; //reset flashcounter, since we're already counting the number of factory-resets. we dont want to hit a flash-count limit during reset.
@@ -761,40 +832,79 @@ void ResetFactory(void)
   fname=FILE_RULES;
   InitFile(fname.c_str(), 0);
 
-  Settings.clearAll();
+  Settings.clearMisc();
+  if (!ResetFactoryDefaultPreference.keepNTP()) {
+    Settings.clearTimeSettings();
+    Settings.UseNTP			= DEFAULT_USE_NTP;
+    strcpy_P(Settings.NTPHost, PSTR(DEFAULT_NTP_HOST));
+    Settings.TimeZone		= DEFAULT_TIME_ZONE;
+    Settings.DST   			= DEFAULT_USE_DST;
+  }
+
+  if (!ResetFactoryDefaultPreference.keepNetwork()) {
+    Settings.clearNetworkSettings();
+    // TD-er Reset access control
+    str2ip((char*)DEFAULT_IPRANGE_LOW, SecuritySettings.AllowedIPrangeLow);
+    str2ip((char*)DEFAULT_IPRANGE_HIGH, SecuritySettings.AllowedIPrangeHigh);
+    SecuritySettings.IPblockLevel = DEFAULT_IP_BLOCK_LEVEL;
+
+    #if DEFAULT_USE_STATIC_IP
+      str2ip((char*)DEFAULT_IP, Settings.IP);
+      str2ip((char*)DEFAULT_DNS, Settings.DNS);
+      str2ip((char*)DEFAULT_GW, Settings.Gateway);
+      str2ip((char*)DEFAULT_SUBNET, Settings.Subnet);
+    #endif
+  }
+
+  Settings.clearNotifications();
+  Settings.clearControllers();
+  Settings.clearTasks();
+  if (!ResetFactoryDefaultPreference.keepLogSettings()) {
+    Settings.clearLogSettings();
+    str2ip((char*)DEFAULT_SYSLOG_IP, Settings.Syslog_IP);
+
+    setLogLevelFor(LOG_TO_SYSLOG, DEFAULT_SYSLOG_LEVEL);
+    setLogLevelFor(LOG_TO_SERIAL, DEFAULT_SERIAL_LOG_LEVEL);
+    setLogLevelFor(LOG_TO_WEBLOG, DEFAULT_WEB_LOG_LEVEL);
+    setLogLevelFor(LOG_TO_SDCARD, DEFAULT_SD_LOG_LEVEL);
+    Settings.SyslogFacility	= DEFAULT_SYSLOG_FACILITY;
+    Settings.UseValueLogger = DEFAULT_USE_SD_LOG;
+  }
+  if (!ResetFactoryDefaultPreference.keepUnitName()) {
+    Settings.clearUnitNameSettings();
+    Settings.Unit           = UNIT;
+    strcpy_P(Settings.Name, PSTR(DEFAULT_NAME));
+    Settings.UDPPort				= 0; //DEFAULT_SYNC_UDP_PORT;
+  }
+  if (!ResetFactoryDefaultPreference.keepWiFi()) {
+    strcpy_P(SecuritySettings.WifiSSID, PSTR(DEFAULT_SSID));
+    strcpy_P(SecuritySettings.WifiKey, PSTR(DEFAULT_KEY));
+    strcpy_P(SecuritySettings.WifiAPKey, PSTR(DEFAULT_AP_KEY));
+    SecuritySettings.WifiSSID2[0] = 0;
+    SecuritySettings.WifiKey2[0] = 0;
+  }
+  SecuritySettings.Password[0] = 0;
+
+  Settings.ResetFactoryDefaultPreference = ResetFactoryDefaultPreference.getPreference();
+
   // now we set all parameters that need to be non-zero as default value
 
-#if DEFAULT_USE_STATIC_IP
-  str2ip((char*)DEFAULT_IP, Settings.IP);
-  str2ip((char*)DEFAULT_DNS, Settings.DNS);
-  str2ip((char*)DEFAULT_GW, Settings.Gateway);
-  str2ip((char*)DEFAULT_SUBNET, Settings.Subnet);
-#endif
 
   Settings.PID             = ESP_PROJECT_PID;
   Settings.Version         = VERSION;
-  Settings.Unit            = UNIT;
-  strcpy_P(SecuritySettings.WifiSSID, PSTR(DEFAULT_SSID));
-  strcpy_P(SecuritySettings.WifiKey, PSTR(DEFAULT_KEY));
-  strcpy_P(SecuritySettings.WifiAPKey, PSTR(DEFAULT_AP_KEY));
-  SecuritySettings.Password[0] = 0;
-  // TD-er Reset access control
-  str2ip((char*)DEFAULT_IPRANGE_LOW, SecuritySettings.AllowedIPrangeLow);
-  str2ip((char*)DEFAULT_IPRANGE_HIGH, SecuritySettings.AllowedIPrangeHigh);
-  SecuritySettings.IPblockLevel = DEFAULT_IP_BLOCK_LEVEL;
-
+  Settings.Build           = BUILD;
+//  Settings.IP_Octet				 = DEFAULT_IP_OCTET;
   Settings.Delay           = DEFAULT_DELAY;
-  Settings.Pin_i2c_sda     = DEFAULT_PIN_I2C_SDA;
-  Settings.Pin_i2c_scl     = DEFAULT_PIN_I2C_SCL;
-  Settings.Pin_status_led  = DEFAULT_PIN_STATUS_LED;
+  Settings.Pin_i2c_sda     = gpio_settings.i2c_sda;
+  Settings.Pin_i2c_scl     = gpio_settings.i2c_scl;
+  Settings.Pin_status_led  = gpio_settings.status_led;
   Settings.Pin_status_led_Inversed  = DEFAULT_PIN_STATUS_LED_INVERSED;
   Settings.Pin_sd_cs       = -1;
-  Settings.Pin_Reset = -1;
-  Settings.Protocol[0]        = DEFAULT_PROTOCOL;
-  strcpy_P(Settings.Name, PSTR(DEFAULT_NAME));
-  Settings.deepSleep = false;
-  Settings.CustomCSS = false;
-  Settings.InitSPI = false;
+  Settings.Pin_Reset       = -1;
+  Settings.Protocol[0]     = DEFAULT_PROTOCOL;
+  Settings.deepSleep       = false;
+  Settings.CustomCSS       = false;
+  Settings.InitSPI         = false;
   for (byte x = 0; x < TASKS_MAX; x++)
   {
     Settings.TaskDevicePin1[x] = -1;
@@ -806,35 +916,20 @@ void ResetFactory(void)
       Settings.TaskDeviceSendData[y][x] = true;
     Settings.TaskDeviceTimer[x] = Settings.Delay;
   }
-  Settings.Build = BUILD;
 
-	// advanced Settings
-	Settings.UseRules 		= DEFAULT_USE_RULES;
+  // advanced Settings
+  Settings.UseRules 		= DEFAULT_USE_RULES;
 
-	Settings.MQTTRetainFlag	= DEFAULT_MQTT_RETAIN;
-	Settings.MessageDelay	= DEFAULT_MQTT_DELAY;
-	Settings.MQTTUseUnitNameAsClientId = DEFAULT_MQTT_USE_UNITNAME_AS_CLIENTID;
+  Settings.MQTTRetainFlag	= DEFAULT_MQTT_RETAIN;
+  Settings.MessageDelay	= DEFAULT_MQTT_DELAY;
+  Settings.MQTTUseUnitNameAsClientId = DEFAULT_MQTT_USE_UNITNAME_AS_CLIENTID;
 
-    Settings.UseNTP			= DEFAULT_USE_NTP;
-	strcpy_P(Settings.NTPHost, PSTR(DEFAULT_NTP_HOST));
-	Settings.TimeZone		= DEFAULT_TIME_ZONE;
-    Settings.DST 			= DEFAULT_USE_DST;
 
-	str2ip((char*)DEFAULT_SYSLOG_IP, Settings.Syslog_IP);
-
-  setLogLevelFor(LOG_TO_SYSLOG, DEFAULT_SYSLOG_LEVEL);
-  setLogLevelFor(LOG_TO_SERIAL, DEFAULT_SERIAL_LOG_LEVEL);
-	setLogLevelFor(LOG_TO_WEBLOG, DEFAULT_WEB_LOG_LEVEL);
-  setLogLevelFor(LOG_TO_SDCARD, DEFAULT_SD_LOG_LEVEL);
-  Settings.SyslogFacility	= DEFAULT_SYSLOG_FACILITY;
-	Settings.UseValueLogger = DEFAULT_USE_SD_LOG;
-
-	Settings.UseSerial		= DEFAULT_USE_SERIAL;
-	Settings.BaudRate		= DEFAULT_SERIAL_BAUD;
+  Settings.UseSerial		= DEFAULT_USE_SERIAL;
+  Settings.BaudRate		= DEFAULT_SERIAL_BAUD;
 
 /*
 	Settings.GlobalSync						= DEFAULT_USE_GLOBAL_SYNC;
-	Settings.UDPPort						= DEFAULT_SYNC_UDP_PORT;
 
 	Settings.IP_Octet						= DEFAULT_IP_OCTET;
 	Settings.WDI2CAddress					= DEFAULT_WD_IC2_ADDRESS;
@@ -847,11 +942,8 @@ void ResetFactory(void)
   strcpy_P(Settings.Name, PSTR(PLUGIN_DESCR));
 #endif
 
-  addPredefinedPlugins();
-  addPredefinedRules();
-
-
-
+  addPredefinedPlugins(gpio_settings);
+  addPredefinedRules(gpio_settings);
 
   SaveSettings();
 
@@ -876,108 +968,6 @@ void ResetFactory(void)
   WifiDisconnect(); // this will store empty ssid/wpa into sdk storage
   WiFi.persistent(false); // Do not use SDK storage of SSID/WPA parameters
   reboot();
-}
-
-void addSwitchPlugin(byte taskIndex, byte gpio, const String& name, bool activeLow) {
-  setTaskDevice_to_TaskIndex(1, taskIndex);
-  setBasicTaskValues(
-    taskIndex,
-    0,            // taskdevicetimer
-    true,         // enabled
-    name,         // name
-    gpio,         // pin1
-    -1,            // pin2
-    -1);           // pin3
-  Settings.TaskDevicePin1PullUp[taskIndex] = true;
-  if (activeLow)
-    Settings.TaskDevicePluginConfig[taskIndex][2] = 1; // PLUGIN_001_BUTTON_TYPE_PUSH_ACTIVE_LOW;
-}
-
-bool addPredefinedPlugins() {
-  byte taskIndex = 0;
-  #ifdef GPIO_KEY1
-  // Create button switch P001
-  addSwitchPlugin(taskIndex, GPIO_KEY1, F("Button1"), true);
-  ++taskIndex;
-  #endif // GPIO_KEY1
-  #ifdef GPIO_KEY2
-  // Create button switch P001
-  addSwitchPlugin(taskIndex, GPIO_KEY2, F("Button2"), true);
-  ++taskIndex;
-  #endif // GPIO_KEY2
-  #ifdef GPIO_KEY3
-  // Create button switch P001
-  addSwitchPlugin(taskIndex, GPIO_KEY3, F("Button3"), true);
-  ++taskIndex;
-  #endif // GPIO_KEY3
-  #ifdef GPIO_KEY4
-  // Create button switch P001
-  addSwitchPlugin(taskIndex, GPIO_KEY4, F("Button4"), true);
-  ++taskIndex;
-  #endif // GPIO_KEY4
-
-  #ifdef GPIO_REL1
-    // Create relay switch P001
-    addSwitchPlugin(taskIndex, GPIO_REL1, F("Relay1"), false);
-    ++taskIndex;
-  #endif // GPIO_REL1
-  #ifdef GPIO_REL2
-    // Create relay switch P001
-    addSwitchPlugin(taskIndex, GPIO_REL2, F("Relay2"), false);
-    ++taskIndex;
-  #endif // GPIO_REL2
-  #ifdef GPIO_REL3
-    // Create relay switch P001
-    addSwitchPlugin(taskIndex, GPIO_REL3, F("Relay3"), false);
-    ++taskIndex;
-  #endif // GPIO_REL3
-  #ifdef GPIO_REL4
-    // Create relay switch P001
-    addSwitchPlugin(taskIndex, GPIO_REL4, F("Relay4"), false);
-    ++taskIndex;
-  #endif // GPIO_REL4
-  return taskIndex != 0; // Indicate something was added
-  // Also needed to make sure the variable is being used.
-}
-
-void addButtonRelayRule(byte buttonNumber, byte relay_gpio) {
-  Settings.UseRules = true;
-  String fileName;
-  #if defined(ESP32)
-    fileName += '/';
-  #endif
-  fileName += F("rules1.txt");
-  String rule = F("on ButtonBNR#switch do\n  if [ButtonBNR#switch]=1\n    gpio,GNR,1\n  else\n    gpio,GNR,0\n  endif\nendon\n");
-  rule.replace(F("BNR"), String(buttonNumber));
-  rule.replace(F("GNR"), String(relay_gpio));
-  String result = appendLineToFile(fileName, rule);
-  if (result.length() > 0) {
-    addLog(LOG_LEVEL_ERROR, result);
-  }
-}
-
-void addPredefinedRules() {
-  #ifdef GPIO_KEY1
-    #ifdef GPIO_REL1
-      addButtonRelayRule(1, GPIO_REL1);
-    #endif // GPIO_REL1
-  #endif // GPIO_KEY1
-  #ifdef GPIO_KEY2
-    #ifdef GPIO_REL2
-      addButtonRelayRule(2, GPIO_REL2);
-    #endif // GPIO_REL2
-  #endif // GPIO_KEY2
-  #ifdef GPIO_KEY3
-    #ifdef GPIO_REL3
-      addButtonRelayRule(3, GPIO_REL3);
-    #endif // GPIO_REL3
-  #endif // GPIO_KEY3
-  #ifdef GPIO_KEY4
-    #ifdef GPIO_REL4
-      addButtonRelayRule(4, GPIO_REL4);
-    #endif // GPIO_REL4
-  #endif // GPIO_KEY4
-
 }
 
 
@@ -1088,7 +1078,7 @@ uint32_t getFlashRealSizeInBytes() {
 String getSystemBuildString() {
   String result;
   result += BUILD;
-  result += F(" ");
+  result += ' ';
   result += F(BUILD_NOTES);
   return result;
 }
@@ -1125,6 +1115,10 @@ String getSystemLibraryString() {
     result += F(", LWIP: ");
     result += getLWIPversion();
   #endif
+  #ifdef PUYASUPPORT
+    result += F(" PUYA support");
+  #endif
+
   return result;
 }
 
@@ -1132,9 +1126,9 @@ String getSystemLibraryString() {
 String getLWIPversion() {
   String result;
   result += LWIP_VERSION_MAJOR;
-  result += F(".");
+  result += '.';
   result += LWIP_VERSION_MINOR;
-  result += F(".");
+  result += '.';
   result += LWIP_VERSION_REVISION;
   if (LWIP_VERSION_IS_RC) {
     result += F("-RC");
@@ -1744,7 +1738,7 @@ String parseTemplate(String &tmpString, byte lineSize)
 
   // padding spaces
   while (newString.length() < lineSize)
-    newString += " ";
+    newString += ' ';
   checkRAM(F("parseTemplate3"));
   return newString;
 }
@@ -1839,7 +1833,7 @@ void transformValue(
             value = val == inverted ? F("OUT") : F(" IN");
             break;
           case 'Z' :// return "0" or "1"
-            value = val == inverted ? F("0") : F("1");
+            value = val == inverted ? "0" : "1";
             break;
           case 'D' ://Dx.y min 'x' digits zero filled & 'y' decimal fixed digits
             {
@@ -1905,7 +1899,7 @@ void transformValue(
                 {
                   int filler = valueJust[1] - value.length() - '0' ; //char '0' = 48; char '9' = 58
                   for (byte f = 0; f < filler; f++)
-                    newString += " ";
+                    newString += ' ';
                 }
               }
               break;
@@ -1916,7 +1910,7 @@ void transformValue(
                 {
                   int filler = valueJust[1] - value.length() - '0' ; //48
                   for (byte f = 0; f < filler; f++)
-                    value += " ";
+                    value += ' ';
                 }
               }
               break;
@@ -1961,14 +1955,14 @@ void transformValue(
       {
         int filler = lineSize - newString.length() - value.length() - tmpString.length() ;
         for (byte f = 0; f < filler; f++)
-          newString += " ";
+          newString += ' ';
       }
       {
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           String logFormatted = F("DEBUG: Formatted String='");
           logFormatted += newString;
           logFormatted += value;
-          logFormatted += "'";
+          logFormatted += '\'';
           addLog(LOG_LEVEL_DEBUG, logFormatted);
         }
       }
@@ -1981,7 +1975,7 @@ void transformValue(
     if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
       String logParsed = F("DEBUG DEV: Parsed String='");
       logParsed += newString;
-      logParsed += "'";
+      logParsed += '\'';
       addLog(LOG_LEVEL_DEBUG_DEV, logParsed);
     }
   }
@@ -2324,13 +2318,15 @@ int CalculateParam(char *TmpStr) {
           errorDesc = F("Unknown error");
           break;
         }
-        String log = String(F("CALCULATE PARAM ERROR: ")) + errorDesc;
-        addLog(LOG_LEVEL_ERROR, log);
-        log = F("CALCULATE PARAM ERROR details: ");
-        log += TmpStr;
-        log += F(" = ");
-        log += round(param);
-        addLog(LOG_LEVEL_ERROR, log);
+        if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
+          String log = String(F("CALCULATE PARAM ERROR: ")) + errorDesc;
+          addLog(LOG_LEVEL_ERROR, log);
+          log = F("CALCULATE PARAM ERROR details: ");
+          log += TmpStr;
+          log += F(" = ");
+          log += round(param);
+          addLog(LOG_LEVEL_ERROR, log);
+        }
       } else {
       if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
         String log = F("CALCULATE PARAM: ");
@@ -2461,7 +2457,7 @@ String rulesProcessingFile(const String& fileName, String& event)
       }
       else
       {      // if line complete, parse this rule
-        line.replace(F("\r"), "");
+        line.replace("\r", "");
         if (line.substring(0, 2) != F("//") && line.length() > 0)
         {
           parseCompleteNonCommentLine(
@@ -2480,7 +2476,7 @@ String rulesProcessingFile(const String& fileName, String& event)
 
   nestingLevel--;
   checkRAM(F("rulesProcessingFile2"));
-  return (F(""));
+  return ("");
 }
 
 void parseCompleteNonCommentLine(
@@ -2638,13 +2634,13 @@ void processMatchedRule(
         else
         {
           String check = lcAction.substring(split + 7);
+          condition[ifBlock-1] = conditionMatchExtended(check);
           if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
             log = F("Lev.");
             log += String(ifBlock);
             log += F(": [elseif ");
             log += check;
-            log += "]=";
-            condition[ifBlock-1] = conditionMatchExtended(check);
+            log += F("]=");
             log += toString(condition[ifBlock-1]);
             addLog(LOG_LEVEL_DEBUG, log);
           }
@@ -2681,10 +2677,12 @@ void processMatchedRule(
       else
       {
         fakeIfBlock++;
-        log = F("Lev.");
-        log += String(ifBlock);
-        log = F(": Error: IF Nesting level exceeded!");
-        addLog(LOG_LEVEL_ERROR, log);
+        if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
+          log = F("Lev.");
+          log += String(ifBlock);
+          log = F(": Error: IF Nesting level exceeded!");
+          addLog(LOG_LEVEL_ERROR, log);
+        }
       }
       isCommand = false;
     }
@@ -2764,6 +2762,7 @@ void processMatchedRule(
           log += tmpAction;
           addLog(LOG_LEVEL_ERROR, log);
         }
+        // TODO: assign here modified action???
       }
       ExecuteCommand(VALUE_SOURCE_SYSTEM, action.c_str());
     }
@@ -2782,8 +2781,8 @@ boolean ruleMatch(String& event, String& rule)
   String tmpRule = rule;
 
   //Ignore escape char
-  tmpRule.replace(F("["),F(""));
-  tmpRule.replace(F("]"),F(""));
+  tmpRule.replace("[","");
+  tmpRule.replace("]","");
 
   // Special handling of literal string events, they should start with '!'
   if (event.charAt(0) == '!')
@@ -3097,15 +3096,15 @@ void SendValueLogger(byte TaskIndex)
     for (byte varNr = 0; varNr < Device[DeviceIndex].ValueCount; varNr++)
     {
       logger += getDateString('-');
-      logger += F(" ");
+      logger += ' ';
       logger += getTimeString(':');
-      logger += F(",");
+      logger += ',';
       logger += Settings.Unit;
-      logger += F(",");
+      logger += ',';
       logger += getTaskDeviceName(TaskIndex);
-      logger += F(",");
+      logger += ',';
       logger += ExtraTaskSettings.TaskDeviceValueNames[varNr];
-      logger += F(",");
+      logger += ',';
       logger += formatUserVarNoCheck(TaskIndex, varNr);
       logger += F("\r\n");
     }
@@ -3175,7 +3174,7 @@ class RamTracker{
               traces[bestCase]+= nextAction[readPtr];
               traces[bestCase]+= "-> ";
               traces[bestCase]+= String(nextActionStartMemory[readPtr]);
-              traces[bestCase]+= " ";
+              traces[bestCase]+= ' ';
               readPtr++;
               if (readPtr >=TRACEENTRIES) readPtr=0;      // wrap around read pointer
             }

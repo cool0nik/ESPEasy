@@ -7,7 +7,7 @@
 #include <IRremoteESP8266.h>
 #endif
 #include <IRsend.h>
-#include <IRutils.h>    
+#include <IRutils.h>
 
 IRsend *Plugin_035_irSender;
 
@@ -15,6 +15,8 @@ IRsend *Plugin_035_irSender;
 #define PLUGIN_035
 #define PLUGIN_ID_035         35
 #define PLUGIN_NAME_035       "Communication - IR Transmit"
+#define STATE_SIZE_MAX        53U
+#define PRONTO_MIN_LENGTH     6U
 
 #define from_32hex(c) ((((c) | ('A' ^ 'a')) - '0') % 39)
 
@@ -40,6 +42,12 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_GET_DEVICEVALUENAMES:
       {
+        break;
+      }
+
+    case PLUGIN_GET_DEVICEGPIONAMES:
+      {
+        event->String1 = formatGpioName_output("LED");
         break;
       }
 
@@ -71,7 +79,7 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
 
         char command[120];
         command[0] = 0;
-        char TmpStr1[100];
+        char TmpStr1[200];
         TmpStr1[0] = 0;
         string.toCharArray(command, 120);
 
@@ -86,18 +94,18 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
           if (irReceiver != 0) irReceiver->disableIRIn(); // Stop the receiver
           #endif
 
-          if (GetArgv(command, TmpStr1, 100, 2)) IrType = TmpStr1;
+          if (GetArgv(command, TmpStr1, 200, 2)) IrType = TmpStr1;
 
           if (IrType.equalsIgnoreCase(F("RAW")) || IrType.equalsIgnoreCase(F("RAW2"))) {
             String IrRaw;
-            uint16_t IrHz=0; 
+            uint16_t IrHz=0;
             unsigned int IrPLen=0;
             unsigned int IrBLen=0;
 
-            if (GetArgv(command, TmpStr1, 100, 3)) IrRaw = TmpStr1;
-            if (GetArgv(command, TmpStr1, 100, 4)) IrHz = str2int(TmpStr1);
-            if (GetArgv(command, TmpStr1, 100, 5)) IrPLen = str2int(TmpStr1);
-            if (GetArgv(command, TmpStr1, 100, 6)) IrBLen = str2int(TmpStr1);
+            if (GetArgv(command, TmpStr1, 200, 3)) IrRaw = TmpStr1;
+            if (GetArgv(command, TmpStr1, 200, 4)) IrHz = str2int(TmpStr1);
+            if (GetArgv(command, TmpStr1, 200, 5)) IrPLen = str2int(TmpStr1);
+            if (GetArgv(command, TmpStr1, 200, 6)) IrBLen = str2int(TmpStr1);
 
             printWebString += F("<a href='https://en.wikipedia.org/wiki/Base32#base32hex'>Base32Hex</a> RAW Code: ");
             printWebString += IrRaw;
@@ -115,7 +123,7 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
             printWebString += IrBLen;
             printWebString += F("<BR>");
 
-            uint16_t buf[200]; 
+            uint16_t buf[200];
             uint16_t idx = 0;
             if (IrType.equalsIgnoreCase(F("RAW"))) {
                 unsigned int c0 = 0; //count consecutives 0s
@@ -144,7 +152,7 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
                         buf[idx++] = c0 * IrBLen;
                         //print the number of 0s just for debuging/info purpouses
                         for (uint t = 0; t < c0; t++)
-                          printWebString += F("0");
+                          printWebString += '0';
                       }
                       //So, as we receive a "1", and processed the counted 0s
                       //sending them as a ms timing into the buffer, we clear
@@ -165,7 +173,7 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
                           buf[idx++] = c1 * IrPLen;
                           //print the number of 1s just for debugging/info purposes
                           for (uint t = 0; t < c1; t++)
-                            printWebString += F("1");
+                            printWebString += '1';
                         }
                         //So, as we receive a "0", and processed the counted 1s
                         //sending them as a ms timing into the buffer, we clear
@@ -186,13 +194,13 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
                 if (c0 > 0) {
                   buf[idx++] = c0 * IrBLen;
                   for (uint t = 0; t < c0; t++)
-                    printWebString += F("0");
+                    printWebString += '0';
                 }
                 //If we have pendings 1s
                 if (c1 > 0) {
                   buf[idx++] = c1 * IrPLen;
                   for (uint t = 0; t < c1; t++)
-                    printWebString += F("1");
+                    printWebString += '1';
                 }
 
                 printWebString += F("<BR>");
@@ -239,21 +247,22 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
           } else {
            // unsigned int IrRepeat=0;
           //  unsigned long IrSecondCode=0UL;
-            char ircodestr[100];
-            if (GetArgv(command, TmpStr1,100, 2)) IrType = TmpStr1;
-                       if (GetArgv(command, TmpStr1, 100, 3)){ IrCode = strtoull(TmpStr1, NULL, 16);
-                                                          memcpy(ircodestr, TmpStr1, sizeof(TmpStr1[0])*100);
+            char ircodestr[200];
+            if (GetArgv(command, TmpStr1,200, 2)) IrType = TmpStr1;
+                       if (GetArgv(command, TmpStr1, 200, 3)){ IrCode = strtoull(TmpStr1, NULL, 16);
+                                                          memcpy(ircodestr, TmpStr1, sizeof(TmpStr1[0])*200);
                                                         }
-            //if (GetArgv(command, TmpStr1, 100, 4)) IrBits = str2int(TmpStr1); //not needed any more... leave it for reverce compatibility or remove it and break existing instalations?
-            //if (GetArgv(command, TmpStr1, 100, 5)) IrRepeat = str2int(TmpStr1); // Ir repeat is usfull in some circonstances, have to see how to add it and have it be revese compatible as well. 
-            //if (GetArgv(command, TmpStr1, 100, 6)) IrSecondCode = strtoul(TmpStr1, NULL, 16);
-            
+            //if (GetArgv(command, TmpStr1, 200, 4)) IrBits = str2int(TmpStr1); //not needed any more... leave it for reverce compatibility or remove it and break existing instalations?
+            //if (GetArgv(command, TmpStr1, 200, 5)) IrRepeat = str2int(TmpStr1); // Ir repeat is usfull in some circonstances, have to see how to add it and have it be revese compatible as well. 
+            //if (GetArgv(command, TmpStr1, 200, 6)) IrSecondCode = strtoul(TmpStr1, NULL, 16);
+
             //Comented out need char[] for input Needs fixing
             if (IrType.equalsIgnoreCase(F("NEC"))) Plugin_035_irSender->sendNEC(IrCode);
             if (IrType.equalsIgnoreCase(F("SONY"))) Plugin_035_irSender->sendSony(IrCode);
             if (IrType.equalsIgnoreCase(F("Sherwood"))) Plugin_035_irSender->sendSherwood(IrCode);
             if (IrType.equalsIgnoreCase(F("SAMSUNG"))) Plugin_035_irSender->sendSAMSUNG(IrCode);
             if (IrType.equalsIgnoreCase(F("LG"))) Plugin_035_irSender->sendLG(IrCode); 
+            if (IrType.equalsIgnoreCase(F("LG2"))) Plugin_035_irSender->sendLG2(IrCode); 
             if (IrType.equalsIgnoreCase(F("SharpRaw"))) Plugin_035_irSender->sendSharpRaw(IrBits);                         
             if (IrType.equalsIgnoreCase(F("JVC"))) Plugin_035_irSender->sendJVC(IrCode);
             if (IrType.equalsIgnoreCase(F("Denon"))) Plugin_035_irSender->sendDenon(IrCode);
@@ -261,35 +270,45 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
             if (IrType.equalsIgnoreCase(F("DISH"))) Plugin_035_irSender->sendDISH(IrCode);
             if (IrType.equalsIgnoreCase(F("Panasonic64"))) Plugin_035_irSender->sendPanasonic64(IrCode);
             if (IrType.equalsIgnoreCase(F("Panasonic"))) Plugin_035_irSender->sendPanasonic64(IrCode);
-            //if (IrType.equalsIgnoreCase(F("PANASONIC"))) Plugin_035_irSender->sendPanasonic(IrCode); // not sure if this works
             if (IrType.equalsIgnoreCase(F("RC5"))) Plugin_035_irSender->sendRC5(IrCode);
+           if (IrType.equalsIgnoreCase(F("RC5X"))) Plugin_035_irSender->sendRC5(IrCode);
             if (IrType.equalsIgnoreCase(F("RC6"))) Plugin_035_irSender->sendRC6(IrCode);
             if (IrType.equalsIgnoreCase(F("RCMM"))) Plugin_035_irSender->sendRCMM(IrCode);
             if (IrType.equalsIgnoreCase(F("COOLIX"))) Plugin_035_irSender->sendCOOLIX(IrCode);
             if (IrType.equalsIgnoreCase(F("Whynter"))) Plugin_035_irSender->sendWhynter(IrCode);
             if (IrType.equalsIgnoreCase(F("Mitsubishi"))) Plugin_035_irSender->sendMitsubishi(IrCode);
             if (IrType.equalsIgnoreCase(F("Mitsubishi2"))) Plugin_035_irSender->sendMitsubishi2(IrCode);
-            if (IrType.equalsIgnoreCase(F("MitsubishiAC"))) parseStringAndSendAirCon(MITSUBISHI_AC, ircodestr);
-            if (IrType.equalsIgnoreCase(F("FujitsuAC"))) parseStringAndSendAirCon(FUJITSU_AC, ircodestr);
             if (IrType.equalsIgnoreCase(F("GC"))) parseStringAndSendGC(ircodestr);                           //Needs testing
-            if (IrType.equalsIgnoreCase(F("Kelvinator"))) parseStringAndSendAirCon(KELVINATOR, ircodestr);
-            if (IrType.equalsIgnoreCase(F("Daikin"))) parseStringAndSendAirCon(DAIKIN, ircodestr);
-            if (IrType.equalsIgnoreCase(F("AiwaRCT501"))) Plugin_035_irSender->sendAiwaRCT501(IrCode);
-            if (IrType.equalsIgnoreCase(F("GREE"))) parseStringAndSendAirCon(GREE, ircodestr);
+            if (IrType.equalsIgnoreCase(F("AIWA_RC_T501"))) Plugin_035_irSender->sendAiwaRCT501(IrCode);
             if (IrType.equalsIgnoreCase(F("Pronto"))) parseStringAndSendPronto(ircodestr, 0);               //Needs testing
-            if (IrType.equalsIgnoreCase(F("Argo"))) parseStringAndSendAirCon(ARGO, ircodestr);
-            if (IrType.equalsIgnoreCase(F("Trotec"))) parseStringAndSendAirCon(TROTEC, ircodestr);
             if (IrType.equalsIgnoreCase(F("Nikai"))) Plugin_035_irSender->sendNikai(IrCode);
-            if (IrType.equalsIgnoreCase(F("ToshibaAC"))) parseStringAndSendAirCon(TOSHIBA_AC, ircodestr);
             if (IrType.equalsIgnoreCase(F("Midea"))) Plugin_035_irSender->sendMidea(IrCode);
             if (IrType.equalsIgnoreCase(F("MagiQuest"))) Plugin_035_irSender->sendMagiQuest(IrCode);
             if (IrType.equalsIgnoreCase(F("Lasertag"))) Plugin_035_irSender->sendLasertag(IrCode);
-            if (IrType.equalsIgnoreCase(F("CarrierAC"))) Plugin_035_irSender->sendCarrierAC(IrCode);
-            if (IrType.equalsIgnoreCase(F("HaierAC"))) parseStringAndSendAirCon(HAIER_AC, ircodestr);
-            if (IrType.equalsIgnoreCase(F("HitachiAC"))) parseStringAndSendAirCon(HITACHI_AC, ircodestr);
-            if (IrType.equalsIgnoreCase(F("HitachiAC1"))) parseStringAndSendAirCon(HITACHI_AC1, ircodestr);
-            if (IrType.equalsIgnoreCase(F("HitachiAC2"))) parseStringAndSendAirCon(HITACHI_AC2, ircodestr);
+            if (IrType.equalsIgnoreCase(F("CARRIER_AC"))) Plugin_035_irSender->sendCarrierAC(IrCode);
             if (IrType.equalsIgnoreCase(F("GICable"))) Plugin_035_irSender->sendGICable(IrCode);
+			      if (IrType.equalsIgnoreCase(F("Pioneer"))) Plugin_035_irSender->sendPioneer(IrCode);
+            if (IrType.equalsIgnoreCase(F("LUTRON"))) Plugin_035_irSender->sendLutron(IrCode);
+            
+            if (IrType.equalsIgnoreCase(F("MITSUBISHI_AC"))) parseStringAndSendAirCon(MITSUBISHI_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("FUJITSU_AC"))) parseStringAndSendAirCon(FUJITSU_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("Kelvinator"))) parseStringAndSendAirCon(KELVINATOR, ircodestr);
+            if (IrType.equalsIgnoreCase(F("Daikin"))) parseStringAndSendAirCon(DAIKIN, ircodestr);
+            if (IrType.equalsIgnoreCase(F("GREE"))) parseStringAndSendAirCon(GREE, ircodestr);
+            if (IrType.equalsIgnoreCase(F("Argo"))) parseStringAndSendAirCon(ARGO, ircodestr);
+            if (IrType.equalsIgnoreCase(F("Trotec"))) parseStringAndSendAirCon(TROTEC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("TOSHIBA_AC"))) parseStringAndSendAirCon(TOSHIBA_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("HAIER_AC"))) parseStringAndSendAirCon(HAIER_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("HITACHI_AC"))) parseStringAndSendAirCon(HITACHI_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("HITACHI_AC1"))) parseStringAndSendAirCon(HITACHI_AC1, ircodestr);
+            if (IrType.equalsIgnoreCase(F("HITACHI_AC2"))) parseStringAndSendAirCon(HITACHI_AC2, ircodestr);
+            if (IrType.equalsIgnoreCase(F("ELECTRA_AC"))) parseStringAndSendAirCon(ELECTRA_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("PANASONIC_AC"))) parseStringAndSendAirCon(PANASONIC_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("HAIER_AC_YRW02"))) parseStringAndSendAirCon(HAIER_AC_YRW02, ircodestr);
+            if (IrType.equalsIgnoreCase(F("SAMSUNG_AC"))) parseStringAndSendAirCon(SAMSUNG_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("WHIRLPOOL_AC"))) parseStringAndSendAirCon(WHIRLPOOL_AC, ircodestr);
+            if (IrType.equalsIgnoreCase(F("MWM"))) parseStringAndSendAirCon(MWM, ircodestr);    
+           // NEC (non-strict)?
           }
 
           addLog(LOG_LEVEL_INFO, (String("IRTX :IR Code Sent: ") + IrType).c_str());
@@ -321,7 +340,7 @@ boolean addErrorTrue(const char *str) {
 // Args:
 //   irType: Nr. of the protocol we need to send.
 //   str: A hexadecimal string containing the state to be sent.
-void parseStringAndSendAirCon(const uint16_t irType, const String str) {
+bool  parseStringAndSendAirCon(const uint16_t irType, const String str) {
   uint8_t strOffset = 0;
   uint8_t state[STATE_SIZE_MAX] = {0};  // All array elements are set to 0.
   uint16_t stateSize = 0;
@@ -332,30 +351,36 @@ void parseStringAndSendAirCon(const uint16_t irType, const String str) {
   uint16_t inputLength = str.length() - strOffset;
   if (inputLength == 0) {
  //   debug("Zero length AirCon code encountered. Ignored.");
-    return;  // No input. Abort.
+    return false;  // No input. Abort.
   }
 
   switch (irType) {  // Get the correct state size for the protocol.
     case KELVINATOR:
-      stateSize = KELVINATOR_STATE_LENGTH;
+      stateSize = kKelvinatorStateLength;
       break;
     case TOSHIBA_AC:
-      stateSize = TOSHIBA_AC_STATE_LENGTH;
+      stateSize = kToshibaACStateLength;
       break;
     case DAIKIN:
-      stateSize = DAIKIN_COMMAND_LENGTH;
+      stateSize = kDaikinStateLength;
+      break;
+    case ELECTRA_AC:
+      stateSize = kElectraAcStateLength;
       break;
     case MITSUBISHI_AC:
-      stateSize = MITSUBISHI_AC_STATE_LENGTH;
+      stateSize = kMitsubishiACStateLength;
+      break;
+    case PANASONIC_AC:
+      stateSize = kPanasonicAcStateLength;
       break;
     case TROTEC:
-      stateSize = TROTEC_COMMAND_LENGTH;
+      stateSize = kTrotecStateLength;
       break;
     case ARGO:
-      stateSize = ARGO_COMMAND_LENGTH;
+      stateSize = kArgoStateLength;
       break;
     case GREE:
-      stateSize = GREE_STATE_LENGTH;
+      stateSize = kGreeStateLength;
       break;
     case FUJITSU_AC:
       // Fujitsu has four distinct & different size states, so make a best guess
@@ -365,34 +390,66 @@ void parseStringAndSendAirCon(const uint16_t irType, const String str) {
       stateSize = inputLength / 2;  // Every two hex chars is a byte.
       // Use at least the minimum size.
       stateSize = std::max(stateSize,
-                           (uint16_t) (FUJITSU_AC_STATE_LENGTH_SHORT - 1));
+                           (uint16_t) (kFujitsuAcStateLengthShort - 1));
       // If we think it isn't a "short" message.
-      if (stateSize > FUJITSU_AC_STATE_LENGTH_SHORT)
+      if (stateSize > kFujitsuAcStateLengthShort)
         // Then it has to be at least the smaller version of the "normal" size.
-        stateSize = std::max(stateSize,
-                             (uint16_t) (FUJITSU_AC_STATE_LENGTH - 1));
+        stateSize = std::max(stateSize, (uint16_t) (kFujitsuAcStateLength - 1));
       // Lastly, it should never exceed the maximum "normal" size.
-      stateSize = std::min(stateSize, (uint16_t) FUJITSU_AC_STATE_LENGTH);
+      stateSize = std::min(stateSize, kFujitsuAcStateLength);
       break;
     case HAIER_AC:
-      stateSize = HAIER_AC_STATE_LENGTH;
+      stateSize = kHaierACStateLength;
+      break;
+    case HAIER_AC_YRW02:
+      stateSize = kHaierACYRW02StateLength;
       break;
     case HITACHI_AC:
-      stateSize = HITACHI_AC_STATE_LENGTH;
+      stateSize = kHitachiAcStateLength;
       break;
     case HITACHI_AC1:
-      stateSize = HITACHI_AC1_STATE_LENGTH;
+      stateSize = kHitachiAc1StateLength;
       break;
     case HITACHI_AC2:
-      stateSize = HITACHI_AC2_STATE_LENGTH;
+      stateSize = kHitachiAc2StateLength;
+      break;
+    case WHIRLPOOL_AC:
+      stateSize = kWhirlpoolAcStateLength;
+      break;
+    case SAMSUNG_AC:
+      // Samsung has two distinct & different size states, so make a best guess
+      // which one we are being presented with based on the number of
+      // hexadecimal digits provided. i.e. Zero-pad if you need to to get
+      // the correct length/byte size.
+      stateSize = inputLength / 2;  // Every two hex chars is a byte.
+      // Use at least the minimum size.
+      stateSize = std::max(stateSize, (uint16_t) (kSamsungAcStateLength));
+      // If we think it isn't a "normal" message.
+      if (stateSize > kSamsungAcStateLength)
+        // Then it probably the extended size.
+        stateSize = std::max(stateSize,
+                             (uint16_t) (kSamsungAcExtendedStateLength));
+      // Lastly, it should never exceed the maximum "extended" size.
+      stateSize = std::min(stateSize, kSamsungAcExtendedStateLength);
+      break;
+    case MWM:
+      // MWM has variable size states, so make a best guess
+      // which one we are being presented with based on the number of
+      // hexadecimal digits provided. i.e. Zero-pad if you need to to get
+      // the correct length/byte size.
+      stateSize = inputLength / 2;  // Every two hex chars is a byte.
+      // Use at least the minimum size.
+      stateSize = std::max(stateSize, (uint16_t) 3);
+      // Cap the maximum size.
+      stateSize = std::min(stateSize, kStateSizeMax);
       break;
     default:  // Not a protocol we expected. Abort.
    //   debug("Unexpected AirCon protocol detected. Ignoring.");
-      return;
+      return false;
   }
   if (inputLength > stateSize * 2) {
    // debug("AirCon code to large for the given protocol.");
-    return;
+    return false;
   }
 
   // Ptr to the least significant byte of the resulting state for this protocol.
@@ -409,7 +466,7 @@ void parseStringAndSendAirCon(const uint16_t irType, const String str) {
         c = c - 'a' + 10;
     } else {
     //  debug("Aborting! Non-hexadecimal char found in AirCon state: " + str);
-      return;
+      return false;
     }
     if (i % 2 == 1) {  // Odd: Upper half of the byte.
       *statePtr += (c << 4);
@@ -466,6 +523,11 @@ void parseStringAndSendAirCon(const uint16_t irType, const String str) {
       Plugin_035_irSender->sendHaierAC(reinterpret_cast<uint8_t *>(state));
       break;
 #endif
+#if SEND_HAIER_AC_YRW02
+    case HAIER_AC_YRW02:
+      Plugin_035_irSender->sendHaierACYRW02(reinterpret_cast<uint8_t *>(state));
+      break;
+#endif
 #if SEND_HITACHI_AC
     case HITACHI_AC:
       Plugin_035_irSender->sendHitachiAC(reinterpret_cast<uint8_t *>(state));
@@ -481,9 +543,38 @@ void parseStringAndSendAirCon(const uint16_t irType, const String str) {
       Plugin_035_irSender->sendHitachiAC2(reinterpret_cast<uint8_t *>(state));
       break;
 #endif
+#if SEND_WHIRLPOOL_AC
+    case WHIRLPOOL_AC:
+      Plugin_035_irSender->sendWhirlpoolAC(reinterpret_cast<uint8_t *>(state));
+      break;
+#endif
+#if SEND_SAMSUNG_AC
+    case SAMSUNG_AC:
+      Plugin_035_irSender->sendSamsungAC(reinterpret_cast<uint8_t *>(state), stateSize);
+      break;
+#endif
+#if SEND_ELECTRA_AC
+    case ELECTRA_AC:
+      Plugin_035_irSender->sendElectraAC(reinterpret_cast<uint8_t *>(state));
+      break;
+#endif
+#if SEND_PANASONIC_AC
+    case PANASONIC_AC:
+      Plugin_035_irSender->sendPanasonicAC(reinterpret_cast<uint8_t *>(state));
+      break;
+#endif
+#if SEND_MWM
+    case MWM:
+      Plugin_035_irSender->sendMWM(reinterpret_cast<uint8_t *>(state), stateSize);
+      break;
+#endif
+    default:
+      //debug("Unexpected AirCon type in send request. Not sent.");
+      return false;
   }
-  
+  return true;  // We were successful as far as we can tell.
 }
+
 
 #if SEND_PRONTO
 // Parse a Pronto Hex String/code and send it.

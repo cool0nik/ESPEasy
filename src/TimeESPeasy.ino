@@ -309,11 +309,11 @@ void checkTime()
       event += weekday_str();
       event += ",";
       if (hour() < 10)
-        event += "0";
+        event += '0';
       event += hour();
       event += ":";
       if (minute() < 10)
-        event += "0";
+        event += '0';
       event += minute();
       rulesProcessing(event);
     }
@@ -329,7 +329,7 @@ bool getNtpTime(double& unixTime_d)
 	IPAddress timeServerIP;
 	String log = F("NTP  : NTP host ");
 	if (Settings.NTPHost[0] != 0) {
-		WiFi.hostByName(Settings.NTPHost, timeServerIP);
+		resolveHostByName(Settings.NTPHost, timeServerIP);
 		log += Settings.NTPHost;
 		// When single set host fails, retry again in a minute
 		nextSyncTime = sysTime + 20;
@@ -337,15 +337,15 @@ bool getNtpTime(double& unixTime_d)
 		// Have to do a lookup eacht time, since the NTP pool always returns another IP
 		String ntpServerName = String(random(0, 3));
 		ntpServerName += F(".pool.ntp.org");
-		WiFi.hostByName(ntpServerName.c_str(), timeServerIP);
+		resolveHostByName(ntpServerName.c_str(), timeServerIP);
 		log += ntpServerName;
 		// When pool host fails, retry can be much sooner
 		nextSyncTime = sysTime + 5;
 	}
 
-	log += F(" (");
+	log += " (";
 	log += timeServerIP.toString();
-	log += F(")");
+	log += ')';
 
 	if (!hostReachable(timeServerIP)) {
 		log += F(" unreachable");
@@ -548,7 +548,7 @@ String timeLong2String(unsigned long lngTime)
 	if (x == 0xf)
 		time += "*";
 	else if (x == 0xe)
-		time += "-";
+		time += '-';
 	else
 		time += x;
 
@@ -556,7 +556,7 @@ String timeLong2String(unsigned long lngTime)
 	if (x == 0xf)
 		time += "*";
 	else if (x == 0xe)
-		time += "-";
+		time += '-';
 	else
 		time += x;
 
@@ -566,7 +566,7 @@ String timeLong2String(unsigned long lngTime)
 	if (x == 0xf)
 		time += "*";
 	else if (x == 0xe)
-		time += "-";
+		time += '-';
 	else
 		time += x;
 
@@ -574,7 +574,7 @@ String timeLong2String(unsigned long lngTime)
 	if (x == 0xf)
 		time += "*";
 	else if (x == 0xe)
-		time += "-";
+		time += '-';
 	else
 		time += x;
 

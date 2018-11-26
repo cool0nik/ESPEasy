@@ -177,7 +177,7 @@
   #define VERSION                             3 // Change in config.dat mapping needs a full reset
 #endif
 
-#define BUILD                           20102 // git version 2.1.02
+#define BUILD                           20103 // git version 2.1.03
 #if defined(ESP8266)
   #define BUILD_NOTES                 " - Mega"
 #endif
@@ -217,6 +217,8 @@
 #define TIMER_C011_DELAY_QUEUE             15
 #define TIMER_C012_DELAY_QUEUE             16
 #define TIMER_C013_DELAY_QUEUE             17
+
+#define TIMING_STATS_THRESHOLD         100000
 
 // Minimum delay between messages for a controller to send in msec.
 #define CONTROLLER_DELAY_QUEUE_DELAY_MAX   3600000
@@ -316,9 +318,11 @@
 
 #if defined(ESP8266)
   #define TASKS_MAX                          12 // max 12!
+  #define MAX_GPIO                           16
 #endif
 #if defined(ESP32)
   #define TASKS_MAX                          32
+  #define MAX_GPIO                           39
 #endif
 
 #define CONTROLLER_MAX                      3 // max 4!
@@ -519,7 +523,7 @@ bool showSettingsFileLayout = false;
   #ifdef FEATURE_MDNS
     #include <ESP8266mDNS.h>
   #endif
-  #define SMALLEST_OTA_IMAGE 272*1024 // smallest known 2-step OTA image
+  #define SMALLEST_OTA_IMAGE 276848 // smallest known 2-step OTA image
   #define MAX_SKETCH_SIZE 1044464
   #ifdef FEATURE_ARDUINO_OTA
     #include <ArduinoOTA.h>
@@ -613,6 +617,10 @@ bool P037_MQTTImport_connected = false;
 // udp protocol stuff (syslog, global sync, node info list, ntp time)
 WiFiUDP portUDP;
 
+bool resolveHostByName(const char* aHostname, IPAddress& aResult);
+bool connectClient(WiFiClient& client, const char* hostname, uint16_t port);
+bool connectClient(WiFiClient& client, IPAddress ip, uint16_t port);
+
 class TimingStats;
 
 /*********************************************************************************************\
@@ -647,6 +655,9 @@ uint16_t I2C_read16_LE_reg(uint8_t i2caddr, byte reg);
 int16_t I2C_readS16_reg(uint8_t i2caddr, byte reg);
 int16_t I2C_readS16_LE_reg(uint8_t i2caddr, byte reg);
 I2Cdev i2cdev;
+
+bool safe_strncpy(char* dest, const String& source, size_t max_size);
+bool safe_strncpy(char* dest, const char* source, size_t max_size);
 
 /*********************************************************************************************\
  * SecurityStruct
@@ -697,8 +708,9 @@ float         customFloatVar[CUSTOM_VARS_MAX];
 \*********************************************************************************************/
 struct SettingsStruct
 {
-  SettingsStruct() {
+  SettingsStruct() : ResetFactoryDefaultPreference(0) {
     clearAll();
+    clearNetworkSettings();
   }
 
   // VariousBits1 defaults to 0, keep in mind when adding bit lookups.
@@ -726,69 +738,96 @@ struct SettingsStruct
     }
   }
 
-  void clearAll() {
+  void clearTimeSettings() {
+    UseNTP = false;
+    NTPHost[0] = 0;
+    TimeZone = 0;
+    DST = false;
+    DST_Start = 0;
+    DST_End = 0;
+    Latitude = 0.0;
+    Longitude = 0.0;
+  }
+
+  void clearNotifications() {
+    for (byte i = 0; i < NOTIFICATION_MAX; ++i) {
+      Notification[i] = 0;
+      NotificationEnabled[i] = false;
+    }
+  }
+
+  void clearControllers() {
+    for (byte i = 0; i < CONTROLLER_MAX; ++i) {
+      Protocol[i] = 0;
+      ControllerEnabled[i] = false;
+    }
+  }
+
+  void clearTasks() {
+    for (byte task = 0; task < TASKS_MAX; ++task) {
+      clearTask(task);
+    }
+  }
+
+  void clearLogSettings() {
+    SyslogLevel = 0;
+    SerialLogLevel = 0;
+    WebLogLevel = 0;
+    SDLogLevel = 0;
+    SyslogFacility = DEFAULT_SYSLOG_FACILITY;
+    for (byte i = 0; i < 4; ++i) {  Syslog_IP[i] = 0; }
+  }
+
+  void clearUnitNameSettings() {
+    Unit = 0;
+    Name[0] = 0;
+    UDPPort = 0;
+  }
+
+  void clearMisc() {
     PID = 0;
     Version = 0;
     Build = 0;
     IP_Octet = 0;
-    Unit = 0;
-    Name[0] = 0;
-    NTPHost[0] = 0;
     Delay = 0;
     Pin_i2c_sda = -1;
     Pin_i2c_scl = -1;
     Pin_status_led = -1;
     Pin_sd_cs = -1;
     for (byte i = 0; i < 17; ++i) { PinBootStates[i] = 0; }
-    for (byte i = 0; i < 4; ++i) {  Syslog_IP[i] = 0; }
-    UDPPort = 0;
-    SyslogLevel = 0;
-    SerialLogLevel = 0;
-    WebLogLevel = 0;
-    SDLogLevel = 0;
     BaudRate = 0;
     MessageDelay = 0;
     deepSleep = 0;
     CustomCSS = false;
-    DST = false;
     WDI2CAddress = 0;
     UseRules = false;
     UseSerial = false;
     UseSSDP = false;
-    UseNTP = false;
     WireClockStretchLimit = 0;
     GlobalSync = false;
     ConnectionFailuresThreshold = 0;
-    TimeZone = 0;
     MQTTRetainFlag = false;
     InitSPI = false;
     Pin_status_led_Inversed = false;
     deepSleepOnFail = false;
     UseValueLogger = false;
     ArduinoOTAEnable = false;
-    DST_Start = 0;
-    DST_End = 0;
     UseRTOSMultitasking = false;
     Pin_Reset = -1;
-    SyslogFacility = DEFAULT_SYSLOG_FACILITY;
     StructSize = sizeof(SettingsStruct);
     MQTTUseUnitNameAsClientId = 0;
-    Latitude = 0.0;
-    Longitude = 0.0;
     VariousBits1 = 0;
+  }
 
-    for (byte i = 0; i < CONTROLLER_MAX; ++i) {
-      Protocol[i] = 0;
-      ControllerEnabled[i] = false;
-    }
-    for (byte i = 0; i < NOTIFICATION_MAX; ++i) {
-      Notification[i] = 0;
-      NotificationEnabled[i] = false;
-    }
-    for (byte task = 0; task < TASKS_MAX; ++task) {
-      clearTask(task);
-    }
+  void clearAll() {
+    clearMisc();
+    clearTimeSettings();
     clearNetworkSettings();
+    clearNotifications();
+    clearControllers();
+    clearTasks();
+    clearLogSettings();
+    clearUnitNameSettings();
   }
 
   void clearTask(byte task) {
@@ -836,7 +875,7 @@ struct SettingsStruct
   int8_t        Pin_i2c_scl;
   int8_t        Pin_status_led;
   int8_t        Pin_sd_cs;
-  int8_t        PinBootStates[17];
+  int8_t        PinBootStates[17];  // FIXME TD-er: this is ESP8266 number of pins. ESP32 has double.
   byte          Syslog_IP[4];
   unsigned int  UDPPort;
   byte          SyslogLevel;
@@ -904,6 +943,7 @@ struct SettingsStruct
   float         Latitude;
   float         Longitude;
   uint32_t      VariousBits1;
+  uint32_t      ResetFactoryDefaultPreference; // Do not clear this one in the clearAll()
 
   // FIXME @TD-er: As discussed in #1292, the CRC for the settings is now disabled.
   // make sure crc is the last value in the struct
@@ -990,7 +1030,7 @@ struct ControllerSettingsStruct
   }
 
   void setHostname(const String& controllerhostname) {
-    strncpy(HostName, controllerhostname.c_str(), sizeof(HostName));
+    safe_strncpy(HostName, controllerhostname.c_str(), sizeof(HostName));
     updateIPcache();
   }
 
@@ -1019,7 +1059,7 @@ struct ControllerSettingsStruct
       // In case of domain name resolution error result can be negative.
       // https://github.com/esp8266/Arduino/blob/18f643c7e2d6a0da9d26ff2b14c94e6536ab78c1/libraries/Ethernet/src/Dns.cpp#L44
       // Thus must match the result with 1.
-      connected = (client.connect(getIP(), Port) == 1);
+      connected = connectClient(client, getIP(), Port);
       if (connected) return true;
       if (!checkHostReachable(false))
         return false;
@@ -1066,7 +1106,7 @@ private:
     }
     if (!WiFiConnected()) return false;
     IPAddress tmpIP;
-    if (WiFi.hostByName(HostName, tmpIP)) {
+    if (resolveHostByName(HostName, tmpIP)) {
       for (byte x = 0; x < 4; x++) {
         IP[x] = tmpIP[x];
       }
@@ -1486,6 +1526,12 @@ struct systemTimerStruct
 };
 std::map<unsigned long, systemTimerStruct> systemTimers;
 
+enum gpio_direction {
+  gpio_input,
+  gpio_output,
+  gpio_bidirectional
+};
+
 /*********************************************************************************************\
  * pinStatesStruct
 \*********************************************************************************************/
@@ -1632,16 +1678,7 @@ Ticker connectionCheck;
 #endif
 
 bool reconnectChecker = false;
-void connectionCheckHandler()
-{
-  if (reconnectChecker == false && !WiFiConnected()){
-    reconnectChecker = true;
-    WiFi.reconnect();
-  }
-  else if (WiFiConnected() && reconnectChecker == true){
-    reconnectChecker = false;
-  }
-}
+void connectionCheckHandler();
 
 bool useStaticIP();
 
@@ -1756,6 +1793,13 @@ class TimingStats {
           return _count;
       }
 
+      bool thresholdExceeded(unsigned long threshold) const {
+        if (_count == 0) {
+            return false;
+        }
+        return _maxVal > threshold;
+      }
+
     private:
       float _timeTotal;
       unsigned int _count;
@@ -1763,6 +1807,7 @@ class TimingStats {
       unsigned long _minVal;
 };
 
+/*
 String getLogLine(const TimingStats& stats) {
     unsigned long minVal, maxVal;
     unsigned int c = stats.getMinMax(minVal, maxVal);
@@ -1779,37 +1824,36 @@ String getLogLine(const TimingStats& stats) {
     log += F(" usec");
     return log;
 }
-
-
+*/
 
 String getPluginFunctionName(int function) {
     switch(function) {
-        case PLUGIN_INIT_ALL:              return F("INIT_ALL            ");
-        case PLUGIN_INIT:                  return F("INIT                ");
-        case PLUGIN_READ:                  return F("READ                ");
-        case PLUGIN_ONCE_A_SECOND:         return F("ONCE_A_SECOND       ");
-        case PLUGIN_TEN_PER_SECOND:        return F("TEN_PER_SECOND      ");
-        case PLUGIN_DEVICE_ADD:            return F("DEVICE_ADD          ");
-        case PLUGIN_EVENTLIST_ADD:         return F("EVENTLIST_ADD       ");
-        case PLUGIN_WEBFORM_SAVE:          return F("WEBFORM_SAVE        ");
-        case PLUGIN_WEBFORM_LOAD:          return F("WEBFORM_LOAD        ");
-        case PLUGIN_WEBFORM_SHOW_VALUES:   return F("WEBFORM_SHOW_VALUES ");
-        case PLUGIN_GET_DEVICENAME:        return F("GET_DEVICENAME      ");
+        case PLUGIN_INIT_ALL:              return F("INIT_ALL");
+        case PLUGIN_INIT:                  return F("INIT");
+        case PLUGIN_READ:                  return F("READ");
+        case PLUGIN_ONCE_A_SECOND:         return F("ONCE_A_SECOND");
+        case PLUGIN_TEN_PER_SECOND:        return F("TEN_PER_SECOND");
+        case PLUGIN_DEVICE_ADD:            return F("DEVICE_ADD");
+        case PLUGIN_EVENTLIST_ADD:         return F("EVENTLIST_ADD");
+        case PLUGIN_WEBFORM_SAVE:          return F("WEBFORM_SAVE");
+        case PLUGIN_WEBFORM_LOAD:          return F("WEBFORM_LOAD");
+        case PLUGIN_WEBFORM_SHOW_VALUES:   return F("WEBFORM_SHOW_VALUES");
+        case PLUGIN_GET_DEVICENAME:        return F("GET_DEVICENAME");
         case PLUGIN_GET_DEVICEVALUENAMES:  return F("GET_DEVICEVALUENAMES");
-        case PLUGIN_WRITE:                 return F("WRITE               ");
-        case PLUGIN_EVENT_OUT:             return F("EVENT_OUT           ");
-        case PLUGIN_WEBFORM_SHOW_CONFIG:   return F("WEBFORM_SHOW_CONFIG ");
-        case PLUGIN_SERIAL_IN:             return F("SERIAL_IN           ");
-        case PLUGIN_UDP_IN:                return F("UDP_IN              ");
-        case PLUGIN_CLOCK_IN:              return F("CLOCK_IN            ");
-        case PLUGIN_TIMER_IN:              return F("TIMER_IN            ");
-        case PLUGIN_FIFTY_PER_SECOND:      return F("FIFTY_PER_SECOND    ");
-        case PLUGIN_SET_CONFIG:            return F("SET_CONFIG          ");
-        case PLUGIN_GET_DEVICEGPIONAMES:   return F("GET_DEVICEGPIONAMES ");
-        case PLUGIN_EXIT:                  return F("EXIT                ");
-        case PLUGIN_GET_CONFIG:            return F("GET_CONFIG          ");
-        case PLUGIN_UNCONDITIONAL_POLL:    return F("UNCONDITIONAL_POLL  ");
-        case PLUGIN_REQUEST:               return F("REQUEST             ");
+        case PLUGIN_WRITE:                 return F("WRITE");
+        case PLUGIN_EVENT_OUT:             return F("EVENT_OUT");
+        case PLUGIN_WEBFORM_SHOW_CONFIG:   return F("WEBFORM_SHOW_CONFIG");
+        case PLUGIN_SERIAL_IN:             return F("SERIAL_IN");
+        case PLUGIN_UDP_IN:                return F("UDP_IN");
+        case PLUGIN_CLOCK_IN:              return F("CLOCK_IN");
+        case PLUGIN_TIMER_IN:              return F("TIMER_IN");
+        case PLUGIN_FIFTY_PER_SECOND:      return F("FIFTY_PER_SECOND");
+        case PLUGIN_SET_CONFIG:            return F("SET_CONFIG");
+        case PLUGIN_GET_DEVICEGPIONAMES:   return F("GET_DEVICEGPIONAMES");
+        case PLUGIN_EXIT:                  return F("EXIT");
+        case PLUGIN_GET_CONFIG:            return F("GET_CONFIG");
+        case PLUGIN_UNCONDITIONAL_POLL:    return F("UNCONDITIONAL_POLL");
+        case PLUGIN_REQUEST:               return F("REQUEST");
     }
     return F("Unknown");
 }
@@ -1850,6 +1894,7 @@ std::map<int,TimingStats> pluginStats;
 std::map<int,TimingStats> miscStats;
 unsigned long timediff_calls = 0;
 unsigned long timediff_cpu_cycles_total = 0;
+unsigned long timingstats_last_reset = 0;
 
 #define LOADFILE_STATS        0
 #define SAVEFILE_STATS        1
@@ -1878,8 +1923,12 @@ unsigned long timediff_cpu_cycles_total = 0;
 #define C011_DELAY_QUEUE     24
 #define C012_DELAY_QUEUE     25
 #define C013_DELAY_QUEUE     26
-
-
+#define TRY_CONNECT_HOST_TCP 27
+#define TRY_CONNECT_HOST_UDP 28
+#define HOST_BY_NAME_STATS   29
+#define CONNECT_CLIENT_STATS 30
+#define LOAD_CUSTOM_TASK_STATS 31
+#define WIFI_ISCONNECTED_STATS 32
 
 
 
@@ -1892,20 +1941,26 @@ unsigned long timediff_cpu_cycles_total = 0;
 
 String getMiscStatsName(int stat) {
     switch (stat) {
-        case LOADFILE_STATS: return F("Load File");
-        case SAVEFILE_STATS: return F("Save File");
-        case LOOP_STATS:     return F("Loop");
-        case PLUGIN_CALL_50PS:      return F("Plugin call 50 p/s  ");
-        case PLUGIN_CALL_10PS:      return F("Plugin call 10 p/s  ");
+        case LOADFILE_STATS:        return F("Load File");
+        case SAVEFILE_STATS:        return F("Save File");
+        case LOOP_STATS:            return F("Loop");
+        case PLUGIN_CALL_50PS:      return F("Plugin call 50 p/s");
+        case PLUGIN_CALL_10PS:      return F("Plugin call 10 p/s");
         case PLUGIN_CALL_10PSU:     return F("Plugin call 10 p/s U");
-        case PLUGIN_CALL_1PS:       return F("Plugin call  1 p/s  ");
-        case SENSOR_SEND_TASK:      return F("SensorSendTask()    ");
-        case SEND_DATA_STATS:       return F("sendData()          ");
-        case COMPUTE_FORMULA_STATS: return F("Compute formula     ");
-        case PROC_SYS_TIMER:        return F("proc_system_timer() ");
-        case SET_NEW_TIMER:         return F("setNewTimerAt()     ");
-        case TIME_DIFF_COMPUTE:     return F("timeDiff()          ");
-        case MQTT_DELAY_QUEUE:      return F("Delay queue     MQTT");
+        case PLUGIN_CALL_1PS:       return F("Plugin call  1 p/s");
+        case SENSOR_SEND_TASK:      return F("SensorSendTask()");
+        case SEND_DATA_STATS:       return F("sendData()");
+        case COMPUTE_FORMULA_STATS: return F("Compute formula");
+        case PROC_SYS_TIMER:        return F("proc_system_timer()");
+        case SET_NEW_TIMER:         return F("setNewTimerAt()");
+        case TIME_DIFF_COMPUTE:     return F("timeDiff()");
+        case MQTT_DELAY_QUEUE:      return F("Delay queue MQTT");
+        case TRY_CONNECT_HOST_TCP:  return F("try_connect_host() (TCP)");
+        case TRY_CONNECT_HOST_UDP:  return F("try_connect_host() (UDP)");
+        case HOST_BY_NAME_STATS:    return F("hostByName()");
+        case CONNECT_CLIENT_STATS:  return F("connectClient()");
+        case LOAD_CUSTOM_TASK_STATS: return F("LoadCustomTaskSettings()");
+        case WIFI_ISCONNECTED_STATS: return F("WiFi.isConnected()");
         case C001_DELAY_QUEUE:
         case C002_DELAY_QUEUE:
         case C003_DELAY_QUEUE:
@@ -1920,13 +1975,160 @@ String getMiscStatsName(int stat) {
         case C012_DELAY_QUEUE:
         case C013_DELAY_QUEUE:
         {
-          String result = F("Delay queue     ");
+          String result;
+          result.reserve(16);
+          result = F("Delay queue ");
           result += get_formatted_Controller_number(static_cast<int>(stat - C001_DELAY_QUEUE + 1));
           return result;
         }
     }
     return F("Unknown");
 }
+
+
+/********************************************************************************************\
+  Pre defined settings for off-the-shelf hardware
+  \*********************************************************************************************/
+
+// This enum will be stored, so do not change order or at least the values.
+enum DeviceModel {
+  DeviceModel_default = 0,
+  DeviceModel_Sonoff_Basic,
+  DeviceModel_Sonoff_TH1x,
+  DeviceModel_Sonoff_S2x,
+  DeviceModel_Sonoff_TouchT1,
+  DeviceModel_Sonoff_TouchT2,
+  DeviceModel_Sonoff_TouchT3,
+  DeviceModel_Sonoff_4ch,
+  DeviceModel_Sonoff_POW,
+  DeviceModel_Sonoff_POWr2,
+  DeviceModel_Shelly1,
+
+  DeviceModel_MAX
+};
+
+struct ResetFactoryDefaultPreference_struct {
+  ResetFactoryDefaultPreference_struct(uint32_t preference = 0) : _preference(preference) {}
+
+  DeviceModel getDeviceModel() const {
+    return static_cast<DeviceModel>(_preference & 0xFF);
+  }
+
+  void setDeviceModel(DeviceModel model) {
+    _preference &= ~(0xFF); // set DeviceModel bits to 0
+    _preference |= model;
+  }
+
+  bool keepWiFi() const { return getBitFromUL(_preference, 9); }
+  void keepWiFi(bool keep) {       setBitToUL(_preference, 9, keep); }
+
+  bool keepNTP() const { return getBitFromUL(_preference, 10); }
+  void keepNTP(bool keep) {       setBitToUL(_preference, 10, keep); }
+
+  bool keepNetwork() const { return getBitFromUL(_preference, 11); }
+  void keepNetwork(bool keep) {       setBitToUL(_preference, 11, keep); }
+
+  bool keepLogSettings() const { return getBitFromUL(_preference, 12); }
+  void keepLogSettings(bool keep) {       setBitToUL(_preference, 12, keep); }
+
+  bool keepUnitName() const { return getBitFromUL(_preference, 13); }
+  void keepUnitName(bool keep) {       setBitToUL(_preference, 13, keep); }
+
+  uint32_t getPreference() { return _preference; }
+
+  // TODO TD-er: Add extra flags for settings to keep/set when reset to default.
+
+private:
+  uint32_t _preference;
+} ResetFactoryDefaultPreference;
+
+void applyFactoryDefaultPref() {
+  // TODO TD-er: Store it in more places to make it more persistent
+  Settings.ResetFactoryDefaultPreference = ResetFactoryDefaultPreference.getPreference();
+}
+
+struct GpioFactorySettingsStruct {
+  GpioFactorySettingsStruct(DeviceModel model = DeviceModel_default) {
+    for (int i = 0; i < 4; ++i) {
+      button[i] = -1;
+      relais[i] = -1;
+    }
+    switch (model) {
+      case DeviceModel_Sonoff_Basic:
+      case DeviceModel_Sonoff_TH1x:
+      case DeviceModel_Sonoff_S2x:
+      case DeviceModel_Sonoff_TouchT1:
+      case DeviceModel_Sonoff_POWr2:
+        button[0] = 0;   // Single Button
+        relais[0] = 12;  // Red Led and Relay (0 = Off, 1 = On)
+        status_led = 13; // Green/Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;
+        i2c_scl = -1;
+        break;
+      case DeviceModel_Sonoff_POW:
+        button[0] = 0;   // Single Button
+        relais[0] = 12;  // Red Led and Relay (0 = Off, 1 = On)
+        status_led = 15; // Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;
+        i2c_scl = -1;    // GPIO5 conflicts with HLW8012 Sel output
+        break;
+      case DeviceModel_Sonoff_TouchT2:
+        button[0] = 0;   // Button 1
+        button[1] = 9;   // Button 2
+        relais[0] = 12;  // Led and Relay1 (0 = Off, 1 = On)
+        relais[1] = 4;   // Led and Relay2 (0 = Off, 1 = On)
+        status_led = 13; // Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;    // GPIO4 conflicts with GPIO_REL3
+        i2c_scl = -1;    // GPIO5 conflicts with GPIO_REL2
+        break;
+      case DeviceModel_Sonoff_TouchT3:
+        button[0] = 0;   // Button 1
+        button[1] = 10;  // Button 2
+        button[2] = 9;   // Button 3
+        relais[0] = 12;  // Led and Relay1 (0 = Off, 1 = On)
+        relais[1] = 5;   // Led and Relay2 (0 = Off, 1 = On)
+        relais[2] = 4;   // Led and Relay3 (0 = Off, 1 = On)
+        status_led = 13; // Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;    // GPIO4 conflicts with GPIO_REL3
+        i2c_scl = -1;    // GPIO5 conflicts with GPIO_REL2
+        break;
+
+      case DeviceModel_Sonoff_4ch:
+        button[0] = 0;   // Button 1
+        button[1] = 9;   // Button 2
+        button[2] = 10;  // Button 3
+        button[3] = 14;  // Button 4
+        relais[0] = 12;  // Red Led and Relay1 (0 = Off, 1 = On)
+        relais[1] = 5;   // Red Led and Relay2 (0 = Off, 1 = On)
+        relais[2] = 4;   // Red Led and Relay3 (0 = Off, 1 = On)
+        relais[3] = 15;  // Red Led and Relay4 (0 = Off, 1 = On)
+        status_led = 13; // Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;    // GPIO4 conflicts with GPIO_REL3
+        i2c_scl = -1;    // GPIO5 conflicts with GPIO_REL2
+        break;
+      case DeviceModel_Shelly1:
+        button[0] = 5;   // Single Button
+        relais[0] = 4;   // Red Led and Relay (0 = Off, 1 = On)
+        status_led = 15; // Blue Led (0 = On, 1 = Off)
+        i2c_sda = -1;    // GPIO4 conflicts with relay control.
+        i2c_scl = -1;    // GPIO5 conflicts with SW input
+        break;
+
+      // case DeviceModel_default: break;
+      default: break;
+    }
+  }
+
+  int8_t button[4];
+  int8_t relais[4];
+  int8_t status_led = DEFAULT_PIN_STATUS_LED;
+  int8_t i2c_sda = DEFAULT_PIN_I2C_SDA;
+  int8_t i2c_scl = DEFAULT_PIN_I2C_SCL;
+};
+
+bool modelMatchingFlashSize(DeviceModel model, int size_MB);
+void addPredefinedPlugins(const GpioFactorySettingsStruct& gpio_settings);
+void addPredefinedRules(const GpioFactorySettingsStruct& gpio_settings);
 
 // These wifi event functions must be in a .h-file because otherwise the preprocessor
 // may not filter the ifdef checks properly.

@@ -93,6 +93,9 @@ String BuildFixes()
     Settings.MQTTUseUnitNameAsClientId = DEFAULT_MQTT_USE_UNITNAME_AS_CLIENTID;
     Settings.StructSize = sizeof(Settings);
   }
+  if (Settings.Build < 20103) {
+    Settings.ResetFactoryDefaultPreference = 0;
+  }
 
   Settings.Build = BUILD;
   return(SaveSettings());
@@ -184,7 +187,20 @@ String SaveSettings(void)
       wifiSetupConnect = true;
     }
   }
+  afterloadSettings();
   return (err);
+}
+
+void afterloadSettings() {
+  ExtraTaskSettings.clear(); // make sure these will not contain old settings.
+  ResetFactoryDefaultPreference_struct pref(Settings.ResetFactoryDefaultPreference);
+  DeviceModel model = pref.getDeviceModel();
+  // TODO TD-er: Try to get the information from more locations to make it more persistent
+  // Maybe EEPROM location?
+
+  if (modelMatchingFlashSize(model)) {
+    ResetFactoryDefaultPreference = Settings.ResetFactoryDefaultPreference;
+  }
 }
 
 /********************************************************************************************\
@@ -234,7 +250,7 @@ String LoadSettings()
     addLog(LOG_LEVEL_ERROR, F("CRC  : SecuritySettings CRC   ...FAIL"));
   }
   setUseStaticIP(useStaticIP());
-  ExtraTaskSettings.clear(); // make sure these will not contain old settings.
+  afterloadSettings();
   return(err);
 }
 
@@ -452,8 +468,11 @@ String ClearCustomTaskSettings(int TaskIndex)
   \*********************************************************************************************/
 String LoadCustomTaskSettings(int TaskIndex, byte* memAddress, int datasize)
 {
+  START_TIMER;
   checkRAM(F("LoadCustomTaskSettings"));
-  return(LoadFromFile(CustomTaskSettings_Type, TaskIndex, (char*)FILE_CONFIG, memAddress, datasize));
+  String result = LoadFromFile(CustomTaskSettings_Type, TaskIndex, (char*)FILE_CONFIG, memAddress, datasize);
+  STOP_TIMER(LOAD_CUSTOM_TASK_STATS);
+  return result;
 }
 
 /********************************************************************************************\
@@ -596,9 +615,14 @@ String SaveToFile(char* fname, int index, byte* memAddress, int datasize)
     {
       SPIFFS_CHECK(f.write(*pointerToByteToSave), fname);
       pointerToByteToSave++;
-      if (timeOutReached(timer)) {
+      if (x % 256 == 0) {
+        // one page written, do some background tasks
+        timer = millis() + 50;
+        delay(0);
+      }
+      if (timeOutReached(timer) ) {
         timer += 50;
-        delay(1);
+        delay(0);
       }
     }
     f.close();

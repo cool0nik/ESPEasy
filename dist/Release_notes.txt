@@ -1,4 +1,291 @@
 -------------------------------------------------
+Changes in release mega-20181125 (since mega-20181124)
+-------------------------------------------------
+
+Release date: Sun Nov 25 04:00:07 CET 2018
+
+Gijs Noorlander (3):
+      LCD P012_LCD Plugin German Umlaute #2081
+      P012_LCD Remove duplicate lines
+      Add -mtarget-align to common build_flags
+
+Unknown (8):
+      [HTML Footer] Change to "Powered by LetsControlIt community"
+      [Factory Reset] Add initial structure to set defaults for a device model
+      [Factory Reset] Add Factory reset page and allow to keep some settings
+      [Factory Reset] Add more categories not to clear
+      [Factory Reset] Show page again after saving.
+      [Sysinfo] Add init to P026_sysinfo to set initial config only 1 active.
+      [Factory Reset] Add some documentation
+      [Documentation] Add link to RTD for plugins
+
+
+-------------------------------------------------
+Changes in release mega-20181124 (since mega-20181123)
+-------------------------------------------------
+
+Release date: Sat Nov 24 04:00:07 CET 2018
+
+Grovkillen (5):
+      [docs] fixed the TOC + added changelogs to all plugins + core
+      [docs] Added plugin names to plugin pages + fixed "site map"
+      [docs] Added donation links in footer
+      [docs] Added hardware pages
+      [docs] Fixed some syntax error
+
+
+-------------------------------------------------
+Changes in release mega-20181123 (since mega-20181122)
+-------------------------------------------------
+
+Release date: Fri Nov 23 04:00:08 CET 2018
+
+Grovkillen (3):
+      [docs] Fixed error in image path
+      [docs] Global variables for plugins + added raw plugin files
+      [docs] added all plugins to global + generated generic pages for them
+
+
+-------------------------------------------------
+Changes in release mega-20181122 (since mega-20181121)
+-------------------------------------------------
+
+Release date: Thu Nov 22 04:00:12 CET 2018
+
+Grovkillen (2):
+      [docs] Plugins (added real name)
+      [docs] added a first device page
+
+TD-er (2):
+      [P073_7DGT] Removed old (duplicate) content
+      [P073_7DGT] Fix uninitialized p073_dispdigit
+
+papperone (2):
+      Update _P073_7DGT.ino
+      Update _P073_7DGT.ino
+
+
+-------------------------------------------------
+Changes in release mega-20181121 (since mega-20181120)
+-------------------------------------------------
+
+Release date: Wed Nov 21 04:00:13 CET 2018
+
+Unknown (2):
+      [SSDP] Disable SSDP checkbox
+      [HTML] Made HTML layout more uniform and optimize CSS
+
+
+-------------------------------------------------
+Changes in release mega-20181120 (since mega-20181117)
+-------------------------------------------------
+
+Release date: Tue Nov 20 04:00:07 CET 2018
+
+Gijs Noorlander (1):
+      Update build_ESPeasy.sh
+
+Unknown (6):
+      [issue 2063] Incorrect saving settings on LCD2004
+      [OLED framed] Do not keep display lines allocated on stack
+      [P075 Nextion] Do not keep display lines allocated on stack
+      [Timing stats] Add LoadCustomTaskSettings() to the timing stats
+      [Build scripts] Add build script for Linux and include docs
+      [Build] Add test_ESP8266_1024_VCC to deploy script
+
+
+-------------------------------------------------
+Changes in release mega-20181117 (since mega-20181112)
+-------------------------------------------------
+
+Release date: Sat Nov 17 04:00:10 CET 2018
+
+Gijs Noorlander (2):
+      Update Sphinx to 1.8.1
+      [PlatformIO] Use 2.4.2 platform for Sonoff builds
+
+Grovkillen (11):
+      [docs] Rules converted from wiki
+      [docs] History converted to rst
+      [docs] Spelling + syntax fix
+      [docs] More spelling
+      [docs] Rules, fixed compile error
+      [docs] About us, month as XX
+      [docs] Plugins list
+      [docs] Plugin list + update to config.py + some CSS
+      [docs] Removed some test code
+      [fix] reverted test code
+      [docs] Inverted icon for easy to navigate browser tabs
+
+Stephen Houser (4):
+      initial 12/24 hour config
+      Add 12/24 hour time to clock
+      Remove update every second
+      add comments for new clock functions
+
+TD-er (4):
+      [1024 VCC] Add test_ESP8266_1024_VCC
+      [Input check] Add check when copying input texts
+      [Statistics] Add timing statistics on connect and DNS lookup
+      [Travis] ESP32 does not support timeout on DNS lookups
+
+jimmys01 (7):
+      Ir Remote lib enchantments
+      Make max IR command to be 200 chars long
+      extra dot fix
+      Put a PLUGIN_EXIT in place
+      syntax fix
+      Add appropriate check to irReceiver before disabling it
+      further improvments
+
+
+-------------------------------------------------
+Changes in release mega-20181112 (since mega-20181111)
+-------------------------------------------------
+
+Release date: Mon Nov 12 04:00:07 CET 2018
+
+Bartlomiej Zimon (1):
+      Eastron fix for model selection     issue #1684
+
+TD-er (6):
+      [Cleanup] Uniform labels for GPIO pins (existing labels)
+      [Cleanup] Uniform labels for GPIO pins
+      [Cleanup] Change label for P035_IRTX
+      [SPIFFS] perform delay during save per page break
+      Improve comments
+      [WiFi] Make sure unhandled WiFi events will be processed
+
+
+-------------------------------------------------
+Changes in release mega-20181111 (since mega-20181110)
+-------------------------------------------------
+
+Release date: Sun Nov 11 04:00:06 CET 2018
+
+Bartlomiej Zimon (2):
+      Webserver /control proper Content type     it sets printToWebJSON during PLUGIN_WRITE/SendStatus     fix for #2018
+      Webserver optimize /control early handled commands
+
+TD-er (1):
+      [JavaScript] Append zero termination to embedded progmem data
+
+
+-------------------------------------------------
+Changes in release mega-20181110 (since mega-20181109)
+-------------------------------------------------
+
+Release date: Sat Nov 10 04:00:08 CET 2018
+
+Bartlomiej Zimon (4):
+      HTTP responses have duplicate Content-Types     fix for #2018
+      remove double strings for contenttype
+      remove old duplication
+      properly send content-type header     fix for #2022
+
+TD-er (2):
+      [ESP32] Upgrade core lib to espressif32@1.5.0
+      [WiFi] Improve disconnect detection and run delay(1) when not connected
+
+
+-------------------------------------------------
+Changes in release mega-20181109 (since mega-20181108)
+-------------------------------------------------
+
+Release date: Fri Nov  9 04:00:10 CET 2018
+
+Bartlomiej Zimon (1):
+      add p078_dev_id to form save
+
+
+-------------------------------------------------
+Changes in release mega-20181108 (since mega-20181107)
+-------------------------------------------------
+
+Release date: Thu Nov  8 04:00:09 CET 2018
+
+Bartlomiej Zimon (2):
+      Add optional DE PIN configuration     Add gpio names to form     fix for #1684
+      Sysinfo update to 4 values
+
+Plebs (4):
+      bug fixes
+      cleaned if from addLog as per uzi18 comment
+      final cleanup
+      BUG fix
+
+TD-er (6):
+      [PUYA] Apply generic patch on all builds checking for PUYA flash
+      [Travis] Update platformIO packages before build
+      [PUYA] Add PUYA patch v3 to check if patch is applied
+      [PUYA] Fix patch v3 for PUYA support
+      [PUYA] share static flash_chip_id among functions
+      [PUYA] Fix typo in patch
+
+stefan (2):
+      Amend nosleep command to accept awake time
+      Add System#NoSleep=<time> event
+
+
+-------------------------------------------------
+Changes in release mega-20181107 (since mega-20181106)
+-------------------------------------------------
+
+Release date: Wed Nov  7 04:00:08 CET 2018
+
+TD-er (14):
+      [Cleanup] Reduce build image size by 2k by wrapping flash strings
+      [Cleanup] Reduce length HTML form data IDs to reduce sketch size
+      [Cleanup] Minify JavaScript and CSS to reduce sketch size
+      [1MB OTA] Add small build to allow for 1MB OTA
+      [Cleanup] Make single definition for pin description
+      [OTA] Add ESP8285 1M OTA minimal build
+      [Cleanup] Strip HTML templates into sections to remove duplicate strings
+      [Cleanup] Increase load speed and lower memory usage rendering web page
+      [Cleanup] Do not use F-macro for short strings
+      [timing stats] Add http://<ip>/stat/timing/json to view timing stats
+      [timingstats] Implement HTML table of timing stats
+      [timingstats] Disable timing stats in log
+      [timingstats] Improve table layout of timing stats
+      [timingstats] Show stats in msec instead of usec.
+
+
+-------------------------------------------------
+Changes in release mega-20181106 (since mega-20181105)
+-------------------------------------------------
+
+Release date: Tue Nov  6 04:00:10 CET 2018
+
+Grovkillen (1):
+      [Flasher] fixed ip bug fixed
+
+
+-------------------------------------------------
+Changes in release mega-20181105 (since mega-20181101)
+-------------------------------------------------
+
+Release date: Mon Nov  5 04:00:10 CET 2018
+
+Bartlomiej Zimon (2):
+      fix for #1986
+      Eastron - save modbus id and enable SDM630 model      partial fix for #1684
+
+Grovkillen (1):
+      [Memanalyzer] cmd args are back (un-commented)
+
+Jimmy Westberg (2):
+      Revert "[Flasher] updated flasher (some minor error)"
+      [Memanalyzer] try to fix the memanalyzer not analyzing all plugins
+
+kpalczewski (1):
+      bump lib IRremoteESP8266 to 2.5.2 and add send Pioneer support for 035 IR plugin.
+
+stefan (2):
+      Add sent/return value check to client.print()
+      Add comment why we check for %256
+
+
+-------------------------------------------------
 Changes in release mega-20181101 (since mega-20181031)
 -------------------------------------------------
 

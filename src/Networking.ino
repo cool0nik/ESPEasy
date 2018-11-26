@@ -11,7 +11,7 @@
   \*********************************************************************************************/
 void syslog(byte logLevel, const char *message)
 {
-  if (Settings.Syslog_IP[0] != 0 && wifiStatus == ESPEASY_WIFI_SERVICES_INITIALIZED)
+  if (Settings.Syslog_IP[0] != 0 && WiFiConnected())
   {
     IPAddress broadcastIP(Settings.Syslog_IP[0], Settings.Syslog_IP[1], Settings.Syslog_IP[2], Settings.Syslog_IP[3]);
     portUDP.beginPacket(broadcastIP, 514);
@@ -672,10 +672,41 @@ bool hostReachable(const IPAddress& ip) {
 */
 }
 
+bool connectClient(WiFiClient& client, const char* hostname, uint16_t port) {
+  IPAddress ip;
+  if (resolveHostByName(hostname, ip)) {
+    return connectClient(client, ip, port);
+  }
+  return false;
+}
+
+bool connectClient(WiFiClient& client, IPAddress ip, uint16_t port)
+{
+  START_TIMER;
+  bool connected = (client.connect(ip, port) == 1);
+  STOP_TIMER(CONNECT_CLIENT_STATS);
+#ifndef ESP32
+  if (connected)
+    client.keepAlive(); // Use default keep alive values
+#endif
+  return connected;
+}
+
+bool resolveHostByName(const char* aHostname, IPAddress& aResult) {
+  START_TIMER;
+#ifdef ESP32
+  bool resolvedIP = WiFi.hostByName(aHostname, aResult) == 1;
+#else
+  bool resolvedIP = WiFi.hostByName(aHostname, aResult, 100) == 1;
+#endif
+  STOP_TIMER(HOST_BY_NAME_STATS);
+  return resolvedIP;
+}
+
 bool hostReachable(const String& hostname) {
   if (!WiFiConnected()) return false;
   IPAddress remote_addr;
-  if (WiFi.hostByName(hostname.c_str(), remote_addr)) {
+  if (resolveHostByName(hostname.c_str(), remote_addr)) {
     return hostReachable(remote_addr);
   }
   String log = F("Hostname cannot be resolved: ");
