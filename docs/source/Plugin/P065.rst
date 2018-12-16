@@ -1,3 +1,4 @@
+.. include:: ../Plugin/_plugin_substitutions_p06x.repl
 .. _P065_page:
 
 |P065_typename|
@@ -24,6 +25,11 @@ Supported hardware
 
 |P065_usedby|
 
+.. Commands available
+.. ^^^^^^^^^^^^^^^^^^
+
+.. .. include:: P065_commands.repl
+
 Change log
 ----------
 
@@ -38,3 +44,6 @@ Change log
 
   |added|
   Initial release version.
+
+
+

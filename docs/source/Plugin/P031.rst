@@ -1,3 +1,4 @@
+.. include:: ../Plugin/_plugin_substitutions_p03x.repl
 .. _P031_page:
 
 |P031_typename|
@@ -24,6 +25,11 @@ Supported hardware
 
 |P031_usedby|
 
+.. Commands available
+.. ^^^^^^^^^^^^^^^^^^
+
+.. .. include:: P031_commands.repl
+
 Change log
 ----------
 
@@ -38,3 +44,6 @@ Change log
 
   |added|
   Initial release version.
+
+
+

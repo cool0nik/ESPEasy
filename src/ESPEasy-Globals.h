@@ -1,8 +1,10 @@
-#define STR_HELPER(x) #x
-#define STR(x) STR_HELPER(x)
-
 #ifndef ESPEASY_GLOBALS_H_
 #define ESPEASY_GLOBALS_H_
+
+#ifndef CORE_2_5_0
+  #define STR_HELPER(x) #x
+  #define STR(x) STR_HELPER(x)
+#endif
 
 // ********************************************************************************
 //   User specific configuration
@@ -73,6 +75,7 @@
 #endif
 
 #define DEFAULT_USE_RULES                       false   // (true|false) Enable Rules?
+#define DEFAULT_RULES_OLDENGINE                true
 
 #define DEFAULT_MQTT_RETAIN                     false   // (true|false) Retain MQTT messages?
 #define DEFAULT_MQTT_DELAY                      100    // Time in milliseconds to retain MQTT messages
@@ -337,7 +340,7 @@
 #define NPLUGIN_MAX                         4
 #define UNIT_MAX                          254 // unit 255 = broadcast
 #define RULES_TIMER_MAX                     8
-#define PINSTATE_TABLE_MAX                 32
+//#define PINSTATE_TABLE_MAX                 32
 #define RULES_MAX_SIZE                   2048
 #define RULES_MAX_NESTING_LEVEL             3
 #define RULESETS_MAX                        4
@@ -353,6 +356,8 @@
 #define PIN_MODE_OUTPUT                     2
 #define PIN_MODE_PWM                        3
 #define PIN_MODE_SERVO                      4
+#define PIN_MODE_INPUT_PULLUP               5
+#define PIN_MODE_OFFLINE                    6
 
 #define SEARCH_PIN_STATE                 true
 #define NO_SEARCH_PIN_STATE             false
@@ -642,7 +647,6 @@ bool WiFiConnected();
 bool hostReachable(const IPAddress& ip);
 bool hostReachable(const String& hostname);
 void formatMAC(const uint8_t* mac, char (&strMAC)[20]);
-void formatIP(const IPAddress& ip, char (&strIP)[20]);
 String to_json_object_value(const String& object, const String& value);
 
 
@@ -716,6 +720,13 @@ struct SettingsStruct
   // VariousBits1 defaults to 0, keep in mind when adding bit lookups.
   bool appendUnitToHostname() {  return !getBitFromUL(VariousBits1, 1); }
   void appendUnitToHostname(bool value) { setBitToUL(VariousBits1, 1, !value); }
+
+  bool uniqueMQTTclientIdReconnect() {  return getBitFromUL(VariousBits1, 2); }
+  void uniqueMQTTclientIdReconnect(bool value) { setBitToUL(VariousBits1, 2, value); }
+
+  bool OldRulesEngine() {  return !getBitFromUL(VariousBits1, 3); }
+  void OldRulesEngine(bool value) {  setBitToUL(VariousBits1, 3, !value); }
+
 
   void validate() {
     if (UDPPort > 65535) UDPPort = 0;
@@ -817,6 +828,7 @@ struct SettingsStruct
     StructSize = sizeof(SettingsStruct);
     MQTTUseUnitNameAsClientId = 0;
     VariousBits1 = 0;
+    OldRulesEngine(DEFAULT_RULES_OLDENGINE);
   }
 
   void clearAll() {
@@ -836,7 +848,7 @@ struct SettingsStruct
       TaskDeviceSendData[i][task] = false;
     }
     TaskDeviceNumber[task] = 0;
-    OLD_TaskDeviceID[task] = 0;
+    OLD_TaskDeviceID[task] = 0; //UNUSED: this can be removed
     TaskDevicePin1[task] = -1;
     TaskDevicePin2[task] = -1;
     TaskDevicePin3[task] = -1;
@@ -901,7 +913,7 @@ struct SettingsStruct
   byte          Protocol[CONTROLLER_MAX];
   byte          Notification[NOTIFICATION_MAX]; //notifications, point to a NPLUGIN id
   byte          TaskDeviceNumber[TASKS_MAX];
-  unsigned int  OLD_TaskDeviceID[TASKS_MAX];
+  unsigned int  OLD_TaskDeviceID[TASKS_MAX];  //UNUSED: this can be removed
   union {
     struct {
       int8_t        TaskDevicePin1[TASKS_MAX];
@@ -955,7 +967,6 @@ struct SettingsStruct
 SettingsStruct* SettingsStruct_ptr = new SettingsStruct;
 SettingsStruct& Settings = *SettingsStruct_ptr;
 */
-
 
 /*********************************************************************************************\
  *  Analyze SettingsStruct and report inconsistencies
@@ -1410,12 +1421,10 @@ struct LogStruct {
 
 } Logging;
 
-std::deque<char> serialLogBuffer;
-unsigned long last_serial_log_read = 0;
+std::deque<char> serialWriteBuffer;
 
 byte highest_active_log_level = 0;
 bool log_to_serial_disabled = false;
-bool log_to_serial_disabled_temporary = false;
 // Do this in a template to prevent casting to String when not needed.
 #define addLog(L,S) if (loglevelActiveFor(L)) { addToLog(L,S); }
 
@@ -1499,7 +1508,7 @@ struct NodeStruct
       for (byte i = 0; i < 4; ++i) ip[i] = 0;
     }
   String nodeName;
-  byte ip[4];
+  IPAddress ip;
   uint16_t build;
   byte age;
   byte nodeType;
@@ -1535,6 +1544,7 @@ enum gpio_direction {
 /*********************************************************************************************\
  * pinStatesStruct
 \*********************************************************************************************/
+/*
 struct pinStatesStruct
 {
   pinStatesStruct() : value(0), plugin(0), index(0), mode(0) {}
@@ -1543,7 +1553,7 @@ struct pinStatesStruct
   byte index;
   byte mode;
 } pinStates[PINSTATE_TABLE_MAX];
-
+*/
 
 // this offsets are in blocks, bytes = blocks * 4
 #define RTC_BASE_STRUCT 64
@@ -1986,6 +1996,24 @@ String getMiscStatsName(int stat) {
 }
 
 
+struct portStatusStruct {
+  portStatusStruct() : state(-1), output(-1), command(0), init(0), mode(0), task(0), monitor(0),  previousTask(-1) {}
+
+  int8_t state : 2; //-1,0,1
+  int8_t output : 2; //-1,0,1
+  int8_t command : 2; //0,1
+  int8_t init : 2; //0,1
+
+  uint8_t mode : 3; //6 current values (max. 8)
+  uint8_t task : 4; //0-15 (max. 16)
+  uint8_t monitor : 1; //0,1
+
+  int8_t previousTask : 8;
+};
+
+std::map<uint32_t, portStatusStruct> globalMapPortStatus;
+
+
 /********************************************************************************************\
   Pre defined settings for off-the-shelf hardware
   \*********************************************************************************************/
@@ -2130,10 +2158,12 @@ bool modelMatchingFlashSize(DeviceModel model, int size_MB);
 void addPredefinedPlugins(const GpioFactorySettingsStruct& gpio_settings);
 void addPredefinedRules(const GpioFactorySettingsStruct& gpio_settings);
 
+
 // These wifi event functions must be in a .h-file because otherwise the preprocessor
 // may not filter the ifdef checks properly.
 // Also the functions use a lot of global defined variables, so include at the end of this file.
 #include "ESPEasyWiFiEvent.h"
-
+#define SPIFFS_CHECK(result, fname) if (!(result)) { return(FileError(__LINE__, fname)); }
+#include "WebServer_Rules.h"
 
 #endif /* ESPEASY_GLOBALS_H_ */

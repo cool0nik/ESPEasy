@@ -1,3 +1,4 @@
+.. include:: ../Plugin/_plugin_substitutions_p02x.repl
 .. _P029_page:
 
 |P029_typename|
@@ -24,6 +25,11 @@ Supported hardware
 
 |P029_usedby|
 
+.. Commands available
+.. ^^^^^^^^^^^^^^^^^^
+
+.. .. include:: P029_commands.repl
+
 Change log
 ----------
 
@@ -38,3 +44,6 @@ Change log
 
   |added|
   Initial release version.
+
+
+

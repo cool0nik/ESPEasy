@@ -1,3 +1,4 @@
+.. include:: ../Plugin/_plugin_substitutions_p02x.repl
 .. _P024_page:
 
 |P024_typename|
@@ -24,6 +25,11 @@ Supported hardware
 
 |P024_usedby|
 
+.. Commands available
+.. ^^^^^^^^^^^^^^^^^^
+
+.. .. include:: P024_commands.repl
+
 Change log
 ----------
 
@@ -38,3 +44,6 @@ Change log
 
   |added|
   Initial release version.
+
+
+

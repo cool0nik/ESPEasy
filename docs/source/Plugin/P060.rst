@@ -1,3 +1,4 @@
+.. include:: ../Plugin/_plugin_substitutions_p06x.repl
 .. _P060_page:
 
 |P060_typename|
@@ -24,6 +25,11 @@ Supported hardware
 
 |P060_usedby|
 
+.. Commands available
+.. ^^^^^^^^^^^^^^^^^^
+
+.. .. include:: P060_commands.repl
+
 Change log
 ----------
 
@@ -38,3 +44,6 @@ Change log
 
   |added|
   Initial release version.
+
+
+
