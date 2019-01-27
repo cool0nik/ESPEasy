@@ -48,17 +48,12 @@ static_assert(std::is_same<std::remove_all_extents<decltype(Settings.TaskDeviceP
 static_assert(std::is_same<std::remove_all_extents<decltype(Settings.TaskDevicePluginConfig)>::type, int16_t>::value, "Needs to update types in plugin");
 static_assert(sizeof(float) >= 2 * sizeof(int16_t), "plugin use memory allocatied for float as two int16");
 
-#define GET_CONFIG_INT_218(event, id)           (Settings.TaskDevicePluginConfig[event->TaskIndex][id])
-#define SET_CONFIG_INT_218(event, id, value)    (Settings.TaskDevicePluginConfig[event->TaskIndex][id] = (value))
-
-#define GET_USER_FLOAT_POINTER_218(event, id)   (&(UserVar[event->BaseVarIndex + id]))
-
 // to avoid the “strict aliasing” warning that appears when make this by using “define”
 // compiler produce bad code if all "#define" replace by "template inline"
 template<typename T>
 inline int16_t * GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(T event, int16_t id)
 {
-  return reinterpret_cast<int16_t*>(GET_USER_FLOAT_POINTER_218(event, id));
+  return reinterpret_cast<int16_t*>(&(UserVar[event->BaseVarIndex + id]));
 }
 
 #define GET_LOW_HALF_FLOAT_AS_INT_POINTER_218(event, id)  (&(GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(event, id)[1]))
@@ -77,20 +72,11 @@ inline int16_t * GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(T event, int16_t id)
 #define PLUGIN_PACKED_INT12_218        1 // state + error pwm
 #define PLUGIN_PACKED_INT34_218        2 // step  + previous value pwm
 
-#define SET_CONTROLLED_TASK_218(event, value)         (SET_CONFIG_INT_218(event, PLUGIN_CONTROLLED_ID_218, value))
-#define GET_CONTROLLED_TASK_218(event)                (GET_CONFIG_INT_218(event, PLUGIN_CONTROLLED_ID_218))
-
-#define SET_CONTROLLED_TASK_VAR_ID_218(event, value)  (SET_CONFIG_INT_218(event, PLUGIN_CONTROLLED_VAR_ID_218, value))
-#define GET_CONTROLLED_TASK_VAR_ID_218(event)         (GET_CONFIG_INT_218(event, PLUGIN_CONTROLLED_VAR_ID_218))
-
-#define GET_PERIOD_218(event)                         (GET_CONFIG_INT_218(event, PLUGIN_PERIOD_218))
-#define SET_PERIOD_218(event, value)                  (SET_CONFIG_INT_218(event, PLUGIN_PERIOD_218, value))
-
 #define GET_PWM_CUR_SATE_POINTER_218(event)           (GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(event, PLUGIN_PACKED_INT12_218))
 #define GET_PWM_ERROR_POINTER_218(event)              (GET_LOW_HALF_FLOAT_AS_INT_POINTER_218(event, PLUGIN_PACKED_INT12_218))
 #define GET_PWM_STEP_POINTER_218(event)               (GET_HIGH_HALF_FLOAT_AS_INT_POINTER_218(event, PLUGIN_PACKED_INT34_218))
 #define GET_PWM_PREVIOUS_VALUE_POINTER_218(event)     (GET_LOW_HALF_FLOAT_AS_INT_POINTER_218(event, PLUGIN_PACKED_INT34_218))
-#define GET_PWM_CUR_SATE_SHOW_POINTER_218(event)      (GET_USER_FLOAT_POINTER_218(event, PLUGIN_SHOW_STATE_218))
+#define GET_PWM_CUR_SATE_SHOW_218(event)              (UserVar[event->BaseVarIndex + PLUGIN_SHOW_STATE_218])
 
 #define GET_PLUGIN_FLAG_218(event, mask)              (Settings.TaskDevicePluginConfigLong[event->TaskIndex][mask] != 0)
 #define SET_PLUGIN_FLAG_218(event, mask, data)        (Settings.TaskDevicePluginConfigLong[event->TaskIndex][mask] = data)
@@ -140,15 +126,15 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
     case PLUGIN_WEBFORM_LOAD:
     {
       addHtml(F("<TR><TD>Check Task:<TD>"));
-      addTaskSelect(F("p218_task"), GET_CONTROLLED_TASK_218(event));
+      addTaskSelect(F("p218_task"), PCONFIG(PLUGIN_CONTROLLED_ID_218));
 
-      LoadTaskSettings(GET_CONTROLLED_TASK_218(event)); // we need to load the values from another task for selection!
+      LoadTaskSettings(PCONFIG(PLUGIN_CONTROLLED_ID_218)); // we need to load the values from another task for selection!
       addHtml(F("<TR><TD>Check Value:<TD>"));
-      addTaskValueSelect(F("p218_value"), GET_CONTROLLED_TASK_VAR_ID_218(event), GET_CONTROLLED_TASK_218(event));
+      addTaskValueSelect(F("p218_value"), PCONFIG(PLUGIN_CONTROLLED_VAR_ID_218), PCONFIG(PLUGIN_CONTROLLED_ID_218));
 
       addFormNumericBox(F("Set Period"),
         F("p218_period"), 
-        p218_normolize_value(GET_PERIOD_218(event), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218),
+        p218_normolize_value(PCONFIG(PLUGIN_PERIOD_218), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218),
         PLUGINT_MIN_PERIOD_218,
         PLUGINT_MAX_PERIOD_218
       );
@@ -164,9 +150,9 @@ boolean Plugin_218(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_WEBFORM_SAVE:
     {
-      SET_CONTROLLED_TASK_218(event, getFormItemInt(F("p218_task")));
-      SET_CONTROLLED_TASK_VAR_ID_218(event, getFormItemInt(F("p218_value")));
-      SET_PERIOD_218(event, p218_normolize_value(getFormItemInt(F("p218_period")), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218));
+      PCONFIG(PLUGIN_CONTROLLED_ID_218) = getFormItemInt(F("p218_task"));
+      PCONFIG(PLUGIN_CONTROLLED_VAR_ID_218) = getFormItemInt(F("p218_value"));
+      PCONFIG(PLUGIN_PERIOD_218) = p218_normolize_value(getFormItemInt(F("p218_period")), PLUGINT_MIN_PERIOD_218, PLUGINT_MAX_PERIOD_218);
 
       SET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218, isFormItemChecked(F("p218_invert")));
 #ifdef FAST_PWM_ID_218
@@ -232,19 +218,19 @@ inline T p218_normolize_value(T t, int16_t min, int16_t max)
 
 void p218_init_settings(struct EventStruct *event)
 {
-  *GET_PWM_CUR_SATE_SHOW_POINTER_218(event) = GET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218) ? 1.0 : 0.0;
+  GET_PWM_CUR_SATE_SHOW_218(event) = GET_PLUGIN_FLAG_218(event, INVERT_OUTPTUT_218) ? 1.0 : 0.0;
   *GET_PWM_CUR_SATE_POINTER_218(event) = 0;
-  *GET_PWM_ERROR_POINTER_218(event) = GET_PERIOD_218(event) / 2;
+  *GET_PWM_ERROR_POINTER_218(event) = PCONFIG(PLUGIN_PERIOD_218) / 2;
   *GET_PWM_STEP_POINTER_218(event) = 0;
 }
 
 void p218_next_step(struct EventStruct *event)
 {
-  int16_t  period = GET_PERIOD_218(event);
+  int16_t  period = PCONFIG(PLUGIN_PERIOD_218);
   int16_t  value;
   {
     int16_t* prev = GET_PWM_PREVIOUS_VALUE_POINTER_218(event);
-    int16_t BaseVarIndex = GET_CONTROLLED_TASK_218(event) * VARS_PER_TASK + GET_CONTROLLED_TASK_VAR_ID_218(event);
+    int16_t BaseVarIndex = PCONFIG(PLUGIN_CONTROLLED_ID_218) * VARS_PER_TASK + PCONFIG(PLUGIN_CONTROLLED_VAR_ID_218);
     float float_value = UserVar[BaseVarIndex];
     if (float_value == float_value) { //  check if value is NaN, use previous value
       value =  p218_normolize_value(float_value * period, 0 , period); // min/max power
@@ -278,7 +264,7 @@ void p218_next_step(struct EventStruct *event)
     }
 
     digitalWrite(Settings.TaskDevicePin1[event->TaskIndex], result);
-    *GET_PWM_CUR_SATE_SHOW_POINTER_218(event) = result;
+    GET_PWM_CUR_SATE_SHOW_218(event) = result;
     sendData(event);
   }
 }
