@@ -486,6 +486,75 @@ void addDisabled() {
   TXBuffer += F(" disabled");
 }
 
+#ifdef ARDUINO_ESP8266_RELEASE_2_3_0
+void WebServerInit()
+{
+  // Prepare webserver pages
+  WebServer.on("/", handle_root);
+  WebServer.on("/config", handle_config);
+  WebServer.on("/controllers", handle_controllers);
+  WebServer.on("/hardware", handle_hardware);
+  WebServer.on("/devices", handle_devices);
+#ifndef NOTIFIER_SET_NONE
+  WebServer.on("/notifications", handle_notifications);
+#endif
+  WebServer.on("/log", handle_log);
+  WebServer.on("/logjson", handle_log_JSON);
+  WebServer.on("/tools", handle_tools);
+  WebServer.on("/i2cscanner", handle_i2cscanner);
+  WebServer.on("/wifiscanner", handle_wifiscanner);
+  WebServer.on("/login", handle_login);
+  WebServer.on("/control", handle_control);
+  WebServer.on("/download", handle_download);
+  WebServer.on("/upload", HTTP_GET, handle_upload);
+  WebServer.on("/upload", HTTP_POST, handle_upload_post, handleFileUpload);
+  WebServer.onNotFound(handleNotFound);
+  WebServer.on("/filelist", handle_filelist);
+#ifdef FEATURE_SD
+  WebServer.on("/SDfilelist", handle_SDfilelist);
+#endif
+  WebServer.on("/advanced", handle_advanced);
+  WebServer.on("/setup", handle_setup);
+  WebServer.on("/json", handle_json);
+  WebServer.on("/timingstats_json", handle_timingstats_json);
+  WebServer.on("/timingstats", handle_timingstats);
+  WebServer.on("/rules", handle_rules_new);
+  WebServer.on("/rules/", Goto_Rules_Root);
+  WebServer.on("/rules/add", []()
+  {
+    handle_rules_edit(WebServer.uri(),true);
+  });
+  WebServer.on("/rules/backup", handle_rules_backup);
+  WebServer.on("/rules/delete", handle_rules_delete);
+  WebServer.on("/sysinfo", handle_sysinfo);
+  WebServer.on("/pinstates", handle_pinstates);
+  WebServer.on("/sysvars", handle_sysvars);
+  WebServer.on("/factoryreset", handle_factoryreset);
+  WebServer.on("/favicon.ico", handle_favicon);
+
+  #if defined(ESP8266)
+  {
+    uint32_t maxSketchSize;
+    bool use2step;
+    if (OTA_possible(maxSketchSize, use2step)) {
+      httpUpdater.setup(&WebServer);
+    }
+  }
+  #endif
+
+  #if defined(ESP8266)
+  if (Settings.UseSSDP)
+  {
+    WebServer.on("/ssdp.xml", HTTP_GET, []() {
+      WiFiClient client(WebServer.client());
+      SSDP_schema(client);
+    });
+    SSDP_begin();
+  }
+  #endif
+}
+
+#else
 void WebServerInit()
 {
   // Prepare webserver pages
@@ -494,7 +563,9 @@ void WebServerInit()
   WebServer.on(F("/controllers"), handle_controllers);
   WebServer.on(F("/hardware"), handle_hardware);
   WebServer.on(F("/devices"), handle_devices);
+#ifndef NOTIFIER_SET_NONE
   WebServer.on(F("/notifications"), handle_notifications);
+#endif
   WebServer.on(F("/log"), handle_log);
   WebServer.on(F("/logjson"), handle_log_JSON);
   WebServer.on(F("/tools"), handle_tools);
@@ -550,6 +621,7 @@ void WebServerInit()
   }
   #endif
 }
+#endif // ARDUINO_ESP8266_RELEASE_2_3_0
 
 void setWebserverRunning(bool state) {
   if (webserver_state == state)
@@ -719,6 +791,10 @@ void getWebPageTemplateVar(const String& varName )
     {
       if (i == MENU_INDEX_RULES && !Settings.UseRules)   //hide rules menu item
         continue;
+#ifdef NOTIFIER_SET_NONE
+      if (i == MENU_INDEX_NOTIFICATIONS)   //hide notifications menu item
+        continue;
+#endif
 
       TXBuffer += F("<a class='menu");
       if (i == navMenuIndex)
@@ -882,12 +958,12 @@ void handle_root() {
     TXBuffer += BUILD_GIT;
 
     addRowLabel(F("Local Time"));
-    if (Settings.UseNTP)
+    if (systemTimePresent())
     {
       TXBuffer += getDateTimeString('-', ':', ' ');
     }
     else
-      TXBuffer += F("<font color='red'>NTP disabled</font>");
+      TXBuffer += F("<font color='red'>No system time source</font>");
 
     addRowLabel(F("Uptime"));
     {
@@ -981,25 +1057,7 @@ void handle_root() {
         if (it->second.build)
           TXBuffer += String(it->second.build);
         html_TD();
-        if (it->second.nodeType)
-          switch (it->second.nodeType)
-          {
-            case NODE_TYPE_ID_ESP_EASY_STD:
-              TXBuffer += F("ESP Easy");
-              break;
-            case NODE_TYPE_ID_ESP_EASYM_STD:
-              TXBuffer += F("ESP Easy Mega");
-              break;
-            case NODE_TYPE_ID_ESP_EASY32_STD:
-              TXBuffer += F("ESP Easy 32");
-              break;
-            case NODE_TYPE_ID_ARDUINO_EASY_STD:
-              TXBuffer += F("Arduino Easy");
-              break;
-            case NODE_TYPE_ID_NANO_EASY_STD:
-              TXBuffer += F("Nano Easy");
-              break;
-          }
+        TXBuffer += getNodeTypeDisplayString(it->second.nodeType);
         html_TD();
         html_add_wide_button_prefix();
         TXBuffer += F("http://");
@@ -1195,8 +1253,19 @@ void handle_config() {
   addHelpButton(F("SleepMode"));
   addFormNote(F("0 = Sleep Disabled, else time awake from sleep"));
 
-  addFormNumericBox( F("Sleep time"), F("delay"), Settings.Delay, 0, 4294);   //limited by hardware to ~1.2h
-  addUnit(F("sec"));
+  int dsmax = 4294; // About 71 minutes
+#if defined(CORE_2_5_0)
+  dsmax = INT_MAX;
+  if ((ESP.deepSleepMax()/1000000ULL) <= (uint64_t)INT_MAX)
+    dsmax = (int)(ESP.deepSleepMax()/1000000ULL);
+#endif
+  addFormNumericBox( F("Sleep time"), F("delay"), Settings.Delay, 0, dsmax);   //limited by hardware
+  {
+    String maxSleeptimeUnit = F("sec (max: ");
+    maxSleeptimeUnit += String(dsmax);
+    maxSleeptimeUnit += ')';
+    addUnit(maxSleeptimeUnit);
+  }
 
   addFormCheckBox(F("Sleep on connection failure"), F("deepsleeponfail"), Settings.deepSleepOnFail);
 
@@ -1259,7 +1328,7 @@ void handle_controllers() {
         ControllerSettings.ClientTimeout = CONTROLLER_CLIENTTIMEOUT_DFLT;
 //        ControllerSettings.MaxQueueDepth = 0;
         if (Protocol[ProtocolIndex].usesTemplate)
-          CPlugin_ptr[ProtocolIndex](CPLUGIN_PROTOCOL_TEMPLATE, &TempEvent, dummyString);
+          CPluginCall(ProtocolIndex, CPLUGIN_PROTOCOL_TEMPLATE, &TempEvent, dummyString);
         safe_strncpy(ControllerSettings.Subscribe, TempEvent.String1.c_str(), sizeof(ControllerSettings.Subscribe));
         safe_strncpy(ControllerSettings.Publish, TempEvent.String2.c_str(), sizeof(ControllerSettings.Publish));
         safe_strncpy(ControllerSettings.MQTTLwtTopic, TempEvent.String3.c_str(), sizeof(ControllerSettings.MQTTLwtTopic));
@@ -1291,7 +1360,7 @@ void handle_controllers() {
         byte ProtocolIndex = getProtocolIndex(Settings.Protocol[controllerindex]);
         TempEvent.ControllerIndex = controllerindex;
         TempEvent.ProtocolIndex = ProtocolIndex;
-        CPlugin_ptr[ProtocolIndex](CPLUGIN_WEBFORM_SAVE, &TempEvent, dummyString);
+        CPluginCall(ProtocolIndex, CPLUGIN_WEBFORM_SAVE, &TempEvent, dummyString);
         ControllerSettings.UseDNS = usedns.toInt();
         if (ControllerSettings.UseDNS)
         {
@@ -1325,7 +1394,7 @@ void handle_controllers() {
         ControllerSettings.ClientTimeout = clienttimeout;
 
 
-        CPlugin_ptr[ProtocolIndex](CPLUGIN_INIT, &TempEvent, dummyString);
+        CPluginCall(ProtocolIndex, CPLUGIN_INIT, &TempEvent, dummyString);
       }
     }
     addHtmlError(SaveControllerSettings(controllerindex, ControllerSettings));
@@ -1364,7 +1433,7 @@ void handle_controllers() {
         html_TD();
         byte ProtocolIndex = getProtocolIndex(Settings.Protocol[x]);
         String ProtocolName = "";
-        CPlugin_ptr[ProtocolIndex](CPLUGIN_GET_DEVICENAME, 0, ProtocolName);
+        CPluginCall(ProtocolIndex, CPLUGIN_GET_DEVICENAME, 0, ProtocolName);
         TXBuffer += ProtocolName;
 
         html_TD();
@@ -1390,7 +1459,7 @@ void handle_controllers() {
     for (byte x = 0; x <= protocolCount; x++)
     {
       String ProtocolName = "";
-      CPlugin_ptr[x](CPLUGIN_GET_DEVICENAME, 0, ProtocolName);
+      CPluginCall(x, CPLUGIN_GET_DEVICENAME, 0, ProtocolName);
       boolean disabled = false;// !((controllerindex == 0) || !Protocol[x].usesMQTT);
       addSelector_Item(ProtocolName,
                        Protocol[x].Number,
@@ -1515,7 +1584,7 @@ void handle_controllers() {
 
       TempEvent.ControllerIndex = controllerindex;
       TempEvent.ProtocolIndex = ProtocolIndex;
-      CPlugin_ptr[ProtocolIndex](CPLUGIN_WEBFORM_LOAD, &TempEvent,TXBuffer.buf);
+      CPluginCall(ProtocolIndex, CPLUGIN_WEBFORM_LOAD, &TempEvent,TXBuffer.buf);
 
     }
 
@@ -1535,6 +1604,7 @@ void handle_controllers() {
 //********************************************************************************
 // Web Interface notifcations page
 //********************************************************************************
+#ifndef NOTIFIER_SET_NONE
 void handle_notifications() {
   checkRAM(F("handle_notifications"));
   if (!isLoggedIn()) return;
@@ -1722,7 +1792,7 @@ void handle_notifications() {
   sendHeadandTail_stdtemplate(_TAIL);
   TXBuffer.endStream();
 }
-
+#endif // NOTIFIER_SET_NONE
 
 //********************************************************************************
 // Web Interface hardware page
@@ -2065,7 +2135,7 @@ void handle_devices() {
             Settings.ControllerEnabled[TempEvent.ControllerIndex] && Settings.Protocol[TempEvent.ControllerIndex])
             {
               TempEvent.ProtocolIndex = getProtocolIndex(Settings.Protocol[TempEvent.ControllerIndex]);
-              CPlugin_ptr[TempEvent.ProtocolIndex](CPLUGIN_TASK_CHANGE_NOTIFICATION, &TempEvent, dummyString);
+              CPluginCall(TempEvent.ProtocolIndex, CPLUGIN_TASK_CHANGE_NOTIFICATION, &TempEvent, dummyString);
             }
         }
     }
@@ -2569,14 +2639,15 @@ void sortDeviceArray()
 
 void addFormPinSelect(const String& label, const String& id, int choice)
 {
-  addRowLabel(label);
+  addRowLabel(label, String("tr_")+id);
   addPinSelect(false, id, choice);
 }
 
 
 void addFormPinSelectI2C(const String& label, const String& id, int choice)
 {
-  addRowLabel(label);
+
+  addRowLabel(label, String("tr_")+id);
   addPinSelect(true, id, choice);
 }
 
@@ -2611,7 +2682,7 @@ String createGPIO_label(int gpio, int pinnr, bool input, bool output, bool warni
   return result;
 }
 
-void addPinSelect(boolean forI2C, String name,  int choice)
+void addPinSelect(boolean forI2C, String id,  int choice)
 {
   #ifdef ESP32
     #define NR_ITEMS_PIN_DROPDOWN  35 // 34 GPIO + 1
@@ -2635,7 +2706,7 @@ void addPinSelect(boolean forI2C, String name,  int choice)
     }
     ++gpio;
   }
-  renderHTMLForPinSelect(gpio_labels, gpio_numbers, forI2C, name, choice, NR_ITEMS_PIN_DROPDOWN);
+  renderHTMLForPinSelect(gpio_labels, gpio_numbers, forI2C, id, choice, NR_ITEMS_PIN_DROPDOWN);
   delete[] gpio_numbers;
   delete[] gpio_labels;
   #undef NR_ITEMS_PIN_DROPDOWN
@@ -2645,8 +2716,8 @@ void addPinSelect(boolean forI2C, String name,  int choice)
 //********************************************************************************
 // Helper function actually rendering dropdown list for addPinSelect()
 //********************************************************************************
-void renderHTMLForPinSelect(String options[], int optionValues[], boolean forI2C, const String& name,  int choice, int count) {
-  addSelector_Head(name, false);
+void renderHTMLForPinSelect(String options[], int optionValues[], boolean forI2C, const String& id,  int choice, int count) {
+  addSelector_Head(id, false);
   for (byte x = 0; x < count; x++)
   {
     boolean disabled = false;
@@ -2685,10 +2756,23 @@ void addFormSelector(const String& label, const String& id, int optionCount, con
   addFormSelector(label, id, optionCount, options, indices, NULL, selectedIndex, false);
 }
 
+void addFormSelector(const String& label, const String& id, int optionCount, const String options[], const int indices[], int selectedIndex, bool reloadonchange)
+{
+  addFormSelector(label, id, optionCount, options, indices, NULL, selectedIndex, reloadonchange);
+}
+
 void addFormSelector(const String& label, const String& id, int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex, boolean reloadonchange)
 {
   addRowLabel(label);
   addSelector(id, optionCount, options, indices, attr, selectedIndex, reloadonchange);
+}
+
+void addFormSelector_script(const String& label, const String& id, int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex, const String& onChangeCall)
+{
+  addRowLabel(label);
+  addSelector_Head(id, onChangeCall, false);
+  addSelector_options(optionCount, options, indices, attr, selectedIndex);
+  addSelector_Foot();
 }
 
 void addSelector(const String& id, int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex, boolean reloadonchange) {
@@ -2697,10 +2781,15 @@ void addSelector(const String& id, int optionCount, const String options[], cons
 
 void addSelector(const String& id, int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex, boolean reloadonchange, bool enabled)
 {
-  int index;
   // FIXME TD-er Change boolean to disabled
   addSelector_Head(id, reloadonchange, !enabled);
+  addSelector_options(optionCount, options, indices, attr, selectedIndex);
+  addSelector_Foot();
+}
 
+void addSelector_options(int optionCount, const String options[], const int indices[], const String attr[], int selectedIndex)
+{
+  int index;
   for (byte x = 0; x < optionCount; x++)
   {
     if (indices)
@@ -2720,7 +2809,6 @@ void addSelector(const String& id, int optionCount, const String options[], cons
     TXBuffer += options[x];
     TXBuffer += F("</option>");
   }
-  TXBuffer += F("</select>");
 }
 
 void addSelector_Head(const String& id, boolean reloadonchange) {
@@ -2729,16 +2817,31 @@ void addSelector_Head(const String& id, boolean reloadonchange) {
 
 void addSelector_Head(const String& id, boolean reloadonchange, bool disabled)
 {
+  if (reloadonchange) {
+    addSelector_Head(id, F("return dept_onchange(frmselect)"), disabled);
+  } else {
+    addSelector_Head(id, "", disabled);
+  }
+}
+
+void addSelector_Head(const String& id, const String& onChangeCall, bool disabled)
+{
   TXBuffer += F("<select class='wide' name='");
+  TXBuffer += id;
+  TXBuffer += F("' id='");
   TXBuffer += id;
   TXBuffer += '\'';
   if (disabled) {
     addDisabled();
   }
-  if (reloadonchange)
-    TXBuffer += F(" onchange='return dept_onchange(frmselect)'");
+  if (onChangeCall.length() > 0) {
+    TXBuffer += F(" onchange='");
+    TXBuffer += onChangeCall;
+    TXBuffer += '\'';
+  }
   TXBuffer += '>';
 }
+
 
 void addSelector_Item(const String& option, int index, boolean selected, boolean disabled, const String& attr)
 {
@@ -2772,10 +2875,20 @@ void addUnit(const String& unit)
   TXBuffer += "]";
 }
 
-
 void addRowLabel(const String& label)
 {
-  html_TR_TD();
+  addRowLabel(label, "");
+}
+
+void addRowLabel(const String& label, const String& id)
+{
+  if (id.length() > 0) {
+    TXBuffer += F("<TR id='");
+    TXBuffer += id;
+    TXBuffer += F("'><TD>");
+  } else {
+    html_TR_TD();
+  }
   TXBuffer += label;
   TXBuffer += ':';
   html_TD();
@@ -2795,9 +2908,13 @@ void addButton(const String &url, const String &label) {
   addButton(url, label, "");
 }
 
-void addButton(const String &url, const String &label, const String& classes)
+void addButton(const String &url, const String &label, const String& classes) {
+  addButton(url, label, classes, true);
+}
+
+void addButton(const String &url, const String &label, const String& classes, bool enabled)
 {
-  html_add_button_prefix(classes);
+  html_add_button_prefix(classes, enabled);
   TXBuffer += url;
   TXBuffer += "'>";
   TXBuffer += label;
@@ -2806,10 +2923,28 @@ void addButton(const String &url, const String &label, const String& classes)
 
 void addButton(class StreamingBuffer &buffer, const String &url, const String &label)
 {
+  addButtonWithSvg(buffer, url, label, "", false);
+}
+
+void addButtonWithSvg(class StreamingBuffer &buffer, const String &url, const String &label, const String& svgPath, bool needConfirm) {
+  bool hasSVG = svgPath.length() > 0;
   buffer += F("<a class='button link' href='");
   buffer += url;
+  if (hasSVG) {
+    buffer += F("' alt='");
+    buffer += label;
+  }
+  if (needConfirm) {
+    buffer += F("' onclick='return confirm(\"Are you sure?\")");
+  }
   buffer += F("'>");
-  buffer += label;
+  if (hasSVG) {
+    buffer += F("<svg width='24' height='24' viewBox='-1 -1 26 26' style='position: relative; top: 5px;'>");
+    buffer += svgPath;
+    buffer += F("</svg>");
+  } else {
+    buffer += label;
+  }
   buffer += F("</a>");
 }
 
@@ -2820,15 +2955,15 @@ void addSaveButton(const String &url, const String &label)
 
 void addSaveButton(class StreamingBuffer &buffer, const String &url, const String &label)
 {
-  buffer += F("<a class='button link' href='");
-  buffer += url;
-  buffer += F("' alt='");
-  buffer += label;
-  buffer += F("'>");
-  buffer += F("<svg width='24' height='24' viewBox='-1 -1 26 26' style='position: relative; top: 5px;'>");
-  buffer += F("<path d='M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z'  stroke='white' fill='white' ></path>");
-  buffer += F("</svg>");
-  buffer += F("</a>");
+#ifdef BUILD_MINIMAL_OTA
+  addButtonWithSvg(buffer, url, label
+     , ""
+     , false);
+#else
+  addButtonWithSvg(buffer, url, label
+     , F("<path d='M19 12v7H5v-7H3v7c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2v-7h-2zm-6 .67l2.59-2.58L17 11.5l-5 5-5-5 1.41-1.41L11 12.67V3h2v9.67z'  stroke='white' fill='white' ></path>")
+     , false);
+#endif
 }
 
 void addDeleteButton(const String &url, const String &label)
@@ -2838,21 +2973,28 @@ void addDeleteButton(const String &url, const String &label)
 
 void addDeleteButton(class StreamingBuffer &buffer, const String &url, const String &label)
 {
-  buffer += F("<a class='button link' href='");
-  buffer += url;
-  buffer += F("' alt='");
-  buffer += label;
-  buffer += F("' onclick='return confirm(\"Are you sure?\")'>");
-  buffer += F("<svg width='24' height='24' viewBox='-1 -1 26 26' style='position: relative; top: 5px;'>");
-  buffer += F("<path fill='none' d='M0 0h24v24H0V0z'></path>");
-  buffer += F("<path d='M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5l-1-1h-5l-1 1H5v2h14V4h-3.5z' stroke='white' fill='white' ></path>");
-  buffer += F("</svg>");
-  buffer += F("</a>");
+#ifdef BUILD_MINIMAL_OTA
+  addButtonWithSvg(buffer, url, label
+     , ""
+     , true);
+#else
+  addButtonWithSvg(buffer, url, label
+    , F("<path fill='none' d='M0 0h24v24H0V0z'></path><path d='M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM8 9h8v10H8V9zm7.5-5l-1-1h-5l-1 1H5v2h14V4h-3.5z' stroke='white' fill='white' ></path>")
+    , true);
+#endif
 }
 
-void addWideButton(const String &url, const String &label, const String &classes)
+void addWideButton(const String &url, const String &label) {
+  addWideButton(url, label, "", true);
+}
+
+void addWideButton(const String &url, const String &label, const String &classes) {
+  addWideButton(url, label, classes, true);
+}
+
+void addWideButton(const String &url, const String &label, const String &classes, bool enabled)
 {
-  html_add_wide_button_prefix(classes);
+  html_add_wide_button_prefix(classes, enabled);
   TXBuffer += url;
   TXBuffer += "'>";
   TXBuffer += label;
@@ -3335,38 +3477,52 @@ void html_end_form() {
 }
 
 void html_add_button_prefix() {
-  html_add_button_prefix("");
+  html_add_button_prefix("", true);
 }
 
-void html_add_button_prefix(const String& classes) {
+void html_add_button_prefix(const String& classes, bool enabled) {
   TXBuffer += F(" <a class='button link");
   if (classes.length() > 0) {
     TXBuffer += ' ';
     TXBuffer += classes;
   }
-  TXBuffer += F("' href='");
+  if (!enabled) {
+    addDisabled();
+  }
+  TXBuffer += '\'';
+  if (!enabled) {
+    addDisabled();
+  }
+  TXBuffer += F(" href='");
 }
 
 void html_add_wide_button_prefix() {
-  html_add_wide_button_prefix("");
+  html_add_wide_button_prefix("", true);
 }
 
-void html_add_wide_button_prefix(const String& classes) {
+void html_add_wide_button_prefix(const String& classes, bool enabled) {
   String wide_classes;
   wide_classes.reserve(classes.length() + 5);
   wide_classes = F("wide ");
   wide_classes += classes;
-  html_add_button_prefix(wide_classes);
+  html_add_button_prefix(wide_classes, enabled);
 }
 
 void html_add_form() {
   TXBuffer += F("<form name='frmselect' method='post'>");
 }
 
+
 void html_add_autosubmit_form() {
   TXBuffer += F("<script><!--\n"
            "function dept_onchange(frmselect) {frmselect.submit();}"
            "\n//--></script>");
+}
+
+void html_add_script(const String& script, bool defer) {
+  html_add_script(defer);
+  addHtml(script);
+  html_add_script_end();
 }
 
 void html_add_script(bool defer) {
@@ -3538,6 +3694,14 @@ void handle_log_JSON() {
 //********************************************************************************
 // Web Interface debug page
 //********************************************************************************
+void addWideButtonPlusDescription(const String& url, const String& buttonText, const String& description)
+{
+  html_TR_TD_height(30);
+  addWideButton(url, buttonText);
+  html_TD();
+  TXBuffer += description;
+}
+
 void handle_tools() {
   if (!isLoggedIn()) return;
   navMenuIndex = MENU_INDEX_TOOLS;
@@ -3584,124 +3748,63 @@ void handle_tools() {
 
   addFormSubHeader(F("System"));
 
-  html_TR_TD_height(30);
-  addWideButton(F("/?cmd=reboot"), F("Reboot"), "");
-  html_TD();
-  TXBuffer += F("Reboots ESP");
-
-  html_TR_TD_height(30);
-  addWideButton(F("log"), F("Log"), "");
-  html_TD();
-  TXBuffer += F("Open log output");
-
-  html_TR_TD_height(30);
-  addWideButton(F("sysinfo"), F("Info"), "");
-  html_TD();
-  TXBuffer += F("Open system info page");
-
-  html_TR_TD_height(30);
-  addWideButton(F("advanced"), F("Advanced"), "");
-  html_TD();
-  TXBuffer += F("Open advanced settings");
-
-  html_TR_TD_height(30);
-  addWideButton(F("json"), F("Show JSON"), "");
-  html_TD();
-  TXBuffer += F("Open JSON output");
-
-  html_TR_TD_height(30);
-  addWideButton(F("timingstats"), F("Timing stats"), "");
-  html_TD();
-  TXBuffer += F("Open timing statistics of system");
-
-  html_TR_TD_height(30);
-  addWideButton(F("pinstates"), F("Pin state buffer"), "");
-  html_TD();
-  TXBuffer += F("Show Pin state buffer");
-
-  html_TR_TD_height(30);
-  addWideButton(F("sysvars"), F("System Variables"), "");
-  html_TD();
-  TXBuffer += F("Show all system variables and conversions");
+  addWideButtonPlusDescription(F("/?cmd=reboot"), F("Reboot"),           F("Reboots ESP"));
+  addWideButtonPlusDescription(F("log"),          F("Log"),              F("Open log output"));
+  addWideButtonPlusDescription(F("sysinfo"),      F("Info"),             F("Open system info page"));
+  addWideButtonPlusDescription(F("advanced"),     F("Advanced"),         F("Open advanced settings"));
+  addWideButtonPlusDescription(F("json"),         F("Show JSON"),        F("Open JSON output"));
+  addWideButtonPlusDescription(F("timingstats"),  F("Timing stats"),     F("Open timing statistics of system"));
+  addWideButtonPlusDescription(F("pinstates"),    F("Pin state buffer"), F("Show Pin state buffer"));
+  addWideButtonPlusDescription(F("sysvars"),      F("System Variables"), F("Show all system variables and conversions"));
 
   addFormSubHeader(F("Wifi"));
 
-  html_TR_TD_height(30);
-  addWideButton(F("/?cmd=wificonnect"), F("Connect"), "");
-  html_TD();
-  TXBuffer += F("Connects to known Wifi network");
-
-  html_TR_TD_height(30);
-  addWideButton(F("/?cmd=wifidisconnect"), F("Disconnect"), "");
-  html_TD();
-  TXBuffer += F("Disconnect from wifi network");
-
-  html_TR_TD_height(30);
-  addWideButton(F("wifiscanner"), F("Scan"), "");
-  html_TD();
-  TXBuffer += F("Scan for wifi networks");
+  addWideButtonPlusDescription(F("/?cmd=wificonnect"),    F("Connect"),    F("Connects to known Wifi network"));
+  addWideButtonPlusDescription(F("/?cmd=wifidisconnect"), F("Disconnect"), F("Disconnect from wifi network"));
+  addWideButtonPlusDescription(F("wifiscanner"),          F("Scan"),       F("Scan for wifi networks"));
 
   addFormSubHeader(F("Interfaces"));
 
-  html_TR_TD_height(30);
-  addWideButton(F("i2cscanner"), F("I2C Scan"), "");
-  html_TD();
-  TXBuffer += F("Scan for I2C devices");
+  addWideButtonPlusDescription(F("i2cscanner"), F("I2C Scan"), F("Scan for I2C devices"));
 
   addFormSubHeader(F("Settings"));
 
-  html_TR_TD_height(30);
-  addWideButton(F("upload"), F("Load"), "");
-  html_TD();
-  TXBuffer += F("Loads a settings file");
+  addWideButtonPlusDescription(F("upload"),   F("Load"), F("Loads a settings file"));
   addFormNote(F("(File MUST be renamed to \"config.dat\" before upload!)"));
-
-  html_TR_TD_height(30);
-  addWideButton(F("download"), F("Save"), "");
-  html_TD();
-  TXBuffer += F("Saves a settings file");
+  addWideButtonPlusDescription(F("download"), F("Save"), F("Saves a settings file"));
 
 #if defined(ESP8266)
   {
     {
       uint32_t maxSketchSize;
       bool use2step;
-      if (OTA_possible(maxSketchSize, use2step)) {
-        addFormSubHeader(F("Firmware"));
-        html_TR_TD_height(30);
-        addWideButton(F("update"), F("Load"), "");
-        addHelpButton(F("EasyOTA"));
-        html_TD();
-        TXBuffer += F("Load a new firmware");
+      bool otaEnabled = OTA_possible(maxSketchSize, use2step);
+      addFormSubHeader(F("Firmware"));
+      html_TR_TD_height(30);
+      addWideButton(F("update"), F("Update Firmware"), "", otaEnabled);
+      addHelpButton(F("EasyOTA"));
+      html_TD();
+      TXBuffer += F("Load a new firmware");
+      if (otaEnabled) {
         if (use2step) {
-          TXBuffer += F(" <b>WARNING</b> only use 2-step OTA update and sketch < ");
-        } else {
-          TXBuffer += F(" Max sketch size: ");
+          TXBuffer += F(" <b>WARNING</b> only use 2-step OTA update.");
         }
-        TXBuffer += maxSketchSize / 1024;
-        TXBuffer += F(" kB");
+      } else {
+        TXBuffer += F(" <b>WARNING</b> OTA not possible.");
       }
+      TXBuffer += F(" Max sketch size: ");
+      TXBuffer += maxSketchSize / 1024;
+      TXBuffer += F(" kB");
     }
   }
 #endif
 
   addFormSubHeader(F("Filesystem"));
 
-  html_TR_TD_height(30);
-  addWideButton(F("filelist"), F("Flash"), "");
-  html_TD();
-  TXBuffer += F("Show files on internal flash");
-
-  html_TR_TD_height(30);
-  addWideButton(F("/factoryreset"), F("Factory Reset"), "");
-  html_TD();
-  TXBuffer += F("Select pre-defined configuration or full erase of settings");
-
+  addWideButtonPlusDescription(F("filelist"),      F("Flash"),         F("Show files on internal flash"));
+  addWideButtonPlusDescription(F("/factoryreset"), F("Factory Reset"), F("Select pre-defined configuration or full erase of settings"));
 #ifdef FEATURE_SD
-  html_TR_TD_height(30);
-  addWideButton(F("SDfilelist"), F("SD Card"), "");
-  html_TD();
-  TXBuffer += F("Show files on SD-Card");
+  addWideButtonPlusDescription(F("SDfilelist"),    F("SD Card"),       F("Show files on SD-Card"));
 #endif
 
   html_end_table();
@@ -4229,15 +4332,7 @@ void handle_json()
           }
 
           if (it->second.nodeType) {
-            String platform;
-            switch (it->second.nodeType)
-            {
-              case NODE_TYPE_ID_ESP_EASY_STD:     platform = F("ESP Easy");      break;
-              case NODE_TYPE_ID_ESP_EASYM_STD:    platform = F("ESP Easy Mega"); break;
-              case NODE_TYPE_ID_ESP_EASY32_STD:   platform = F("ESP Easy 32");   break;
-              case NODE_TYPE_ID_ARDUINO_EASY_STD: platform = F("Arduino Easy");  break;
-              case NODE_TYPE_ID_NANO_EASY_STD:    platform = F("Nano Easy");     break;
-            }
+            String platform = getNodeTypeDisplayString(it->second.nodeType);
             if (platform.length() > 0)
               stream_next_json_object_value(F("platform"), platform);
           }
@@ -4424,7 +4519,7 @@ long stream_timing_statistics(bool clearStats) {
   long timeSinceLastReset = timePassedSince(timingstats_last_reset);
   for (auto& x: pluginStats) {
       if (!x.second.isEmpty()) {
-          const int pluginId = x.first/32;
+          const int pluginId = x.first/256;
           String P_name = "";
           Plugin_ptr[pluginId](PLUGIN_GET_DEVICENAME, NULL, P_name);
           if (x.second.thresholdExceeded(TIMING_STATS_THRESHOLD)) {
@@ -4433,11 +4528,31 @@ long stream_timing_statistics(bool clearStats) {
             html_TR_TD();
           }
           TXBuffer += F("P_");
-          TXBuffer += pluginId + 1;
+          TXBuffer += Device[pluginId].Number;
           TXBuffer += '_';
           TXBuffer += P_name;
           html_TD();
-          TXBuffer += getPluginFunctionName(x.first%32);
+          TXBuffer += getPluginFunctionName(x.first%256);
+          stream_html_timing_stats(x.second, timeSinceLastReset);
+          if (clearStats) x.second.reset();
+      }
+  }
+  for (auto& x: controllerStats) {
+      if (!x.second.isEmpty()) {
+          const int pluginId = x.first/256;
+          String C_name = "";
+          CPluginCall(pluginId, CPLUGIN_GET_DEVICENAME, NULL, C_name);
+          if (x.second.thresholdExceeded(TIMING_STATS_THRESHOLD)) {
+            html_TR_TD_highlight();
+          } else {
+            html_TR_TD();
+          }
+          TXBuffer += F("C_");
+          TXBuffer += Protocol[pluginId].Number;
+          TXBuffer += '_';
+          TXBuffer += C_name;
+          html_TD();
+          TXBuffer += getCPluginCFunctionName(x.first%256);
           stream_html_timing_stats(x.second, timeSinceLastReset);
           if (clearStats) x.second.reset();
       }
@@ -4558,7 +4673,7 @@ void handle_advanced() {
     Settings.OldRulesEngine(isFormItemChecked(F("oldrulesengine")));
 
     addHtmlError(SaveSettings());
-    if (Settings.UseNTP)
+    if (systemTimePresent())
       initTime();
   }
 
@@ -4766,7 +4881,7 @@ void handle_download()
   str += F("_Build");
   str += BUILD;
   str += '_';
-  if (Settings.UseNTP)
+  if (systemTimePresent())
   {
     str += getDateTimeString('\0', '\0', '\0');
   }
@@ -4936,8 +5051,8 @@ bool loadFromFS(boolean spiffs, String path) {
   else if (path.endsWith(F(".gif"))) dataType = F("image/gif");
   else if (path.endsWith(F(".jpg"))) dataType = F("image/jpeg");
   else if (path.endsWith(F(".ico"))) dataType = F("image/x-icon");
-  else if (path.endsWith(F(".txt"))) dataType = F("application/octet-stream");
-  else if (path.endsWith(F(".dat"))) dataType = F("application/octet-stream");
+  else if (path.endsWith(F(".txt")) ||
+           path.endsWith(F(".dat"))) dataType = F("application/octet-stream");
   else if (path.endsWith(F(".esp"))) return handle_custom(path);
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
     String log = F("HTML : Request file ");
@@ -5216,7 +5331,7 @@ void handle_filelist() {
   {
     html_add_button_prefix();
     TXBuffer += F("/filelist?start=");
-    TXBuffer += max(0, startIdx - pageSize);
+    TXBuffer += std::max(0, startIdx - pageSize);
     TXBuffer += F("'>Previous</a>");
   }
   if (count >= endIdx and dir.next())
@@ -5942,7 +6057,7 @@ void handle_sysinfo() {
   addRowLabel(F("Unit"));
   TXBuffer += Settings.Unit;
 
-  if (Settings.UseNTP)
+  if (systemTimePresent())
   {
      addRowLabel(F("Local Time"));
      TXBuffer += getDateTimeString('-', ':', ' ');
@@ -6164,8 +6279,10 @@ void handle_sysinfo() {
     TXBuffer += ESP.getCpuFreqMHz();
     TXBuffer += F(" MHz");
   #endif
+  #ifdef ARDUINO_BOARD
   addRowLabel(F("ESP Board Name"));
   TXBuffer += ARDUINO_BOARD;
+  #endif
 
   addTableSeparator(F("Storage"), 2, 3);
 
@@ -6177,18 +6294,16 @@ void handle_sysinfo() {
     TXBuffer += F("Vendor: ");
     TXBuffer += formatToHex(flashChipId & 0xFF);
 
-    #ifdef PUYASUPPORT
-    if (ESP.flashIsPuya()) {
-      TXBuffer += F(" (PUYA, supported)");
-    }
-    #else
-    if ((flashChipId & 0x000000ff) == 0x85)  // 0x146085 PUYA
+    if (flashChipVendorPuya())
     {
       TXBuffer += F(" (PUYA");
-      TXBuffer += F(HTML_SYMBOL_WARNING);
+      if (puyaSupport()) {
+        TXBuffer += F(", supported");
+      } else {
+        TXBuffer += F(HTML_SYMBOL_WARNING);
+      }
       TXBuffer += ')';
     }
-    #endif
     TXBuffer += F(" Device: ");
     uint32_t flashDevice = (flashChipId & 0xFF00) | ((flashChipId >> 16) & 0xFF);
     TXBuffer += formatToHex(flashDevice);
@@ -6218,7 +6333,7 @@ void handle_sysinfo() {
       case FM_DIO:   TXBuffer += F("DIO");  break;
       case FM_DOUT:  TXBuffer += F("DOUT"); break;
       default:
-          TXBuffer += F("Unknown"); break;
+          TXBuffer += getUnknownString(); break;
     }
   #endif
 
@@ -6596,6 +6711,7 @@ void write_SVG_image_header(int width, int height, bool useViewbox) {
   TXBuffer += '>';
 }
 
+/*
 void getESPeasyLogo(int width_pixels) {
   write_SVG_image_header(width_pixels, width_pixels, true);
   TXBuffer += F("<g transform=\"translate(-33.686 -7.8142)\">");
@@ -6605,6 +6721,7 @@ void getESPeasyLogo(int width_pixels) {
   TXBuffer += F("<circle cx=\"58\" cy=\"102.1\" r=\"3\" fill=\"#fff\"/>");
   TXBuffer += F("</g></g></svg>");
 }
+*/
 
 void getConfig_dat_file_layout() {
   const int shiftY = 2;

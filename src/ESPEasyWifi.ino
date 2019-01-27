@@ -13,6 +13,7 @@ bool unprocessedWifiEvents() {
 void processConnect() {
   if (processedConnect) return;
   processedConnect = true;
+  delay(100); // FIXME TD-er: See https://github.com/letscontrolit/ESPEasy/issues/1987#issuecomment-451644424
   ++wifi_reconnects;
   if (wifiStatus < ESPEASY_WIFI_CONNECTED) return;
   const long connect_duration = timeDiff(last_wifi_connect_attempt_moment, lastConnectMoment);
@@ -39,12 +40,16 @@ void processConnect() {
     setupStaticIPconfig();
     markGotIP();
   }
+  if (!WiFi.getAutoConnect()) {
+    WiFi.setAutoConnect(true);
+  }
   logConnectionStatus();
 }
 
 void processDisconnect() {
   if (processedDisconnect) return;
   processedDisconnect = true;
+  delay(100); // FIXME TD-er: See https://github.com/letscontrolit/ESPEasy/issues/1987#issuecomment-451644424
   if (Settings.UseRules) {
     String event = F("WiFi#Disconnected");
     rulesProcessing(event);
@@ -127,7 +132,7 @@ void processGotIP() {
   #endif
 
   // First try to get the time, since that may be used in logs
-  if (Settings.UseNTP) {
+  if (systemTimePresent()) {
     initTime();
   }
   mqtt_reconnect_count = 0;
@@ -246,11 +251,9 @@ void processScanDone() {
 
 void resetWiFi() {
   addLog(LOG_LEVEL_INFO, F("Reset WiFi."));
-//  setWifiMode(WIFI_OFF);
-//  setWifiMode(WIFI_STA);
   lastDisconnectMoment = millis();
-  processedDisconnect = false;
-  wifiStatus = ESPEASY_WIFI_DISCONNECTED;
+  WifiDisconnect();
+//  setWifiMode(WIFI_OFF);
 }
 
 void connectionCheckHandler()
@@ -335,7 +338,8 @@ void setSTA(bool enable) {
 }
 
 void setAP(bool enable) {
-  switch(WiFi.getMode()) {
+  WiFiMode_t wifimode = WiFi.getMode();
+  switch(wifimode) {
     case WIFI_OFF:
       if (enable) setWifiMode(WIFI_AP);
       break;
@@ -351,13 +355,20 @@ void setAP(bool enable) {
     default:
       break;
   }
-  setAPinternal(enable);
+  if (WifiIsAP(wifimode) && !enable) {
+    String event = F("WiFi#APmodeDisabled");
+    rulesProcessing(event);
+  }
+  if (WifiIsAP(wifimode) != enable) {
+    // Mode has changed
+    setAPinternal(enable);
+  }
 }
 
 //Only internal scope
 void setAPinternal(bool enable)
 {
-    if (enable) {
+  if (enable) {
     timerAPoff = millis() + WIFI_AP_OFF_TIMER_DURATION;
     // create and store unique AP SSID/PW to prevent ESP from starting AP mode with default SSID and No password!
     // setup ssid for AP Mode when needed
@@ -369,6 +380,8 @@ void setAPinternal(bool enable)
     }
     if (WiFi.softAP(softAPSSID.c_str(),pwd.c_str())) {
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+        String event = F("WiFi#APmodeEnabled");
+        rulesProcessing(event);
         String log(F("WIFI : AP Mode ssid will be "));
         log += softAPSSID;
         log += F(" with address ");
@@ -467,9 +480,11 @@ bool WiFiConnected() {
       return true;
     }
     // else wifiStatus is no longer in sync.
+    addLog(LOG_LEVEL_INFO, F("WIFI  : WiFiConnected() out of sync"));
     resetWiFi();
   }
   delay(1);
+  STOP_TIMER(WIFI_ISCONNECTED_STATS);  // SMY: also count this call when not connected
   return false;
 }
 
@@ -559,10 +574,10 @@ bool wifiConnectTimeoutReached() {
   // wait until it connects + add some device specific random offset to prevent
   // all nodes overloading the accesspoint when turning on at the same time.
   #if defined(ESP8266)
-  const unsigned int randomOffset_in_sec = wifi_connect_attempt == 1 ? 0 : 1000 * ((ESP.getChipId() & 0xF));
+  const unsigned int randomOffset_in_sec = (wifi_connect_attempt == 1) ? 0 : 1000 * ((ESP.getChipId() & 0xF));
   #endif
   #if defined(ESP32)
-  const unsigned int randomOffset_in_sec = wifi_connect_attempt == 1 ? 0 : 1000 * ((ESP.getEfuseMac() & 0xF));
+  const unsigned int randomOffset_in_sec = (wifi_connect_attempt == 1) ? 0 : 1000 * ((ESP.getEfuseMac() & 0xF));
   #endif
   return timeOutReached(last_wifi_connect_attempt_moment + DEFAULT_WIFI_CONNECTION_TIMEOUT + randomOffset_in_sec);
 }
@@ -602,8 +617,10 @@ bool tryConnectWiFi() {
       return(true);   //already connected, need to disconnect first
     }
   }
-  if (!wifiConnectTimeoutReached())
+  if (!wifiConnectTimeoutReached()) {
+    delay(0); // SMY: give some time to handle WiFi
     return true;    // timeout not reached yet, thus no need to retry again.
+  }
   if (!selectValidWiFiSettings()) {
     addLog(LOG_LEVEL_ERROR, F("WIFI : No valid WiFi settings!"));
     return false;
@@ -624,13 +641,14 @@ bool tryConnectWiFi() {
     addLog(LOG_LEVEL_INFO, log);
   }
   setupStaticIPconfig();
+//  WiFi.setPhyMode(WIFI_PHY_MODE_11G); // SMY: uncomment to force 802.11g for use with MikroTik AP's.
   last_wifi_connect_attempt_moment = millis();
   switch (wifi_connect_attempt) {
     case 0:
       if (lastBSSID[0] == 0)
         WiFi.begin(ssid, passphrase);
       else
-        WiFi.begin(ssid, passphrase, 0, &lastBSSID[0]);
+        WiFi.begin(ssid, passphrase, last_channel, &lastBSSID[0]);
       break;
     default:
       WiFi.begin(ssid, passphrase);
@@ -644,7 +662,7 @@ bool tryConnectWiFi() {
         log += ssid;
         addLog(LOG_LEVEL_INFO, log);
       }
-      return false;
+      break;
     }
     case WL_CONNECT_FAILED: {
       if (loglevelActiveFor(LOG_LEVEL_INFO)) {
@@ -652,12 +670,31 @@ bool tryConnectWiFi() {
         log += ssid;
         addLog(LOG_LEVEL_INFO, log);
       }
-      return false;
+      break;
+    }
+    case WL_DISCONNECTED: {
+      if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+        String log = F("WIFI : Not configured in Station Mode!!: ");
+        log += ssid;
+        addLog(LOG_LEVEL_INFO, log);
+      }
+      break;
+    }
+    case WL_IDLE_STATUS: {
+      if (loglevelActiveFor(LOG_LEVEL_INFO)) {
+        String log = F("WIFI : Connection in IDLE state: ");
+        log += ssid;
+        addLog(LOG_LEVEL_INFO, log);
+      }
+      break;
+    }
+    case WL_CONNECTED: {
+      return true;
     }
     default:
      break;
   }
-  return true; // Sent
+  return false;
 }
 
 //********************************************************************************
@@ -752,7 +789,7 @@ String SDKwifiStatusToString(uint8_t sdk_wifistatus) {
     case STATION_CONNECT_FAIL:   return F("STATION_CONNECT_FAIL");
     case STATION_GOT_IP:         return F("STATION_GOT_IP");
   }
-  return F("Unknown");
+  return getUnknownString();
 }
 #endif
 
@@ -818,12 +855,18 @@ void WifiCheck()
 
   processDisableAPmode();
   IPAddress ip = WiFi.localIP();
-  if (!useStaticIP()) {
-    if (ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0) {
-      if (WiFiConnected()) {
+  if (WiFiConnected()) { // let's just check for wifi, no matter if we have an IP or not...
+    if (!useStaticIP()) {
+      if (ip[0] == 0 && ip[1] == 0 && ip[2] == 0 && ip[3] == 0) {
         // Some strange situation where the DHCP renew probably has failed and erased the config.
+        addLog(LOG_LEVEL_ERROR, F("WIFI : DHCP renew probably failed"));
         resetWiFi();
       }
+    }
+  } else {
+    if (wifiStatus == ESPEASY_WIFI_SERVICES_INITIALIZED) { // SMY: WiFi seems to be disconnected and out of sync with internal state... strange... we should never get here!!
+      addLog(LOG_LEVEL_ERROR, F("WIFI : WiFiCheck out of sync"));
+      resetWiFi();
     }
   }
 
@@ -897,7 +940,7 @@ String getLastDisconnectReason() {
     case WIFI_DISCONNECT_REASON_AUTH_FAIL:                  reason += F("Auth fail");                break;
     case WIFI_DISCONNECT_REASON_ASSOC_FAIL:                 reason += F("Assoc fail");               break;
     case WIFI_DISCONNECT_REASON_HANDSHAKE_TIMEOUT:          reason += F("Handshake timeout");        break;
-    default:  reason += F("Unknown"); 	  break;
+    default:  reason += getUnknownString(); 	  break;
   }
   return reason;
 }

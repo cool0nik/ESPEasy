@@ -103,6 +103,19 @@ int firstEnabledBlynkController() {
 
 //void checkRAM( const __FlashStringHelper* flashString);
 
+#ifdef CORE_2_5_0
+/*********************************************************************************************\
+ * Pre-init
+\*********************************************************************************************/
+void preinit() {
+  // Global WiFi constructors are not called yet
+  // (global class instances like WiFi, Serial... are not yet initialized)..
+  // No global object methods or C++ exceptions can be called in here!
+  //The below is a static class method, which is similar to a function, so it's ok.
+  ESP8266WiFiClass::preinitWiFiOff();
+}
+#endif
+
 /*********************************************************************************************\
  * SETUP
 \*********************************************************************************************/
@@ -306,7 +319,7 @@ void setup()
 
   sendSysInfoUDP(3);
 
-  if (Settings.UseNTP)
+  if (systemTimePresent())
     initTime();
 
 #if FEATURE_ADC_VCC
@@ -406,7 +419,7 @@ int firstEnabledMQTTController() {
 bool getControllerProtocolDisplayName(byte ProtocolIndex, byte parameterIdx, String& protoDisplayName) {
   EventStruct tmpEvent;
   tmpEvent.idx=parameterIdx;
-  return CPlugin_ptr[ProtocolIndex](CPLUGIN_GET_PROTOCOL_DISPLAY_NAME, &tmpEvent, protoDisplayName);
+  return CPluginCall(ProtocolIndex, CPLUGIN_GET_PROTOCOL_DISPLAY_NAME, &tmpEvent, protoDisplayName);
 }
 
 void updateLoopStats() {
@@ -489,7 +502,7 @@ void loop()
     WiFiConnectRelaxed();
     wifiSetupConnect = false;
   }
-  if (wifiStatus != ESPEASY_WIFI_SERVICES_INITIALIZED || unprocessedWifiEvents()) {
+  if ((wifiStatus != ESPEASY_WIFI_SERVICES_INITIALIZED) || unprocessedWifiEvents()) {
     // WiFi connection is not yet available, so introduce some extra delays to
     // help the background tasks managing wifi connections
     delay(1);
@@ -599,22 +612,6 @@ void runPeriodicalMQTT() {
   }
 }
 
-String getMQTT_state() {
-  switch (MQTTclient.state()) {
-    case MQTT_CONNECTION_TIMEOUT     : return F("Connection timeout");
-    case MQTT_CONNECTION_LOST        : return F("Connection lost");
-    case MQTT_CONNECT_FAILED         : return F("Connect failed");
-    case MQTT_DISCONNECTED           : return F("Disconnected");
-    case MQTT_CONNECTED              : return F("Connected");
-    case MQTT_CONNECT_BAD_PROTOCOL   : return F("Connect bad protocol");
-    case MQTT_CONNECT_BAD_CLIENT_ID  : return F("Connect bad client_id");
-    case MQTT_CONNECT_UNAVAILABLE    : return F("Connect unavailable");
-    case MQTT_CONNECT_BAD_CREDENTIALS: return F("Connect bad credentials");
-    case MQTT_CONNECT_UNAUTHORIZED   : return F("Connect unauthorized");
-    default: return "";
-  }
-}
-
 void updateMQTTclient_connected() {
   if (MQTTclient_connected != MQTTclient.connected()) {
     MQTTclient_connected = !MQTTclient_connected;
@@ -664,7 +661,8 @@ void run10TimesPerSecond() {
   }
   {
     START_TIMER;
-    PluginCall(PLUGIN_UNCONDITIONAL_POLL, 0, dummyString);
+//    PluginCall(PLUGIN_UNCONDITIONAL_POLL, 0, dummyString);
+    PluginCall(PLUGIN_MONITOR, 0, dummyString);
     STOP_TIMER(PLUGIN_CALL_10PSU);
   }
   if (Settings.UseRules && eventBuffer.length() > 0)
@@ -718,7 +716,7 @@ void runOncePerSecond()
   WifiCheck();
 
   // clock events
-  if (Settings.UseNTP)
+  if (systemTimePresent())
     checkTime();
 
 //  unsigned long start = micros();
@@ -794,6 +792,8 @@ void runEach30Seconds()
     log += connectionFailures;
     log += F(" FreeMem ");
     log += FreeMem();
+    log += F(" WiFiStatus ");
+    log += wifiStatus;
     addLog(LOG_LEVEL_INFO, log);
   }
   sendSysInfoUDP(1);
@@ -836,7 +836,7 @@ void SensorSendTask(byte TaskIndex)
   {
     byte varIndex = TaskIndex * VARS_PER_TASK;
 
-    boolean success = false;
+    bool success = false;
     byte DeviceIndex = getDeviceIndex(Settings.TaskDeviceNumber[TaskIndex]);
     LoadTaskSettings(TaskIndex);
 
@@ -903,6 +903,7 @@ void backgroundtasks()
   {
     return;
   }
+  START_TIMER
   runningBackgroundTasks=true;
 
   #if defined(ESP8266)
@@ -940,4 +941,5 @@ void backgroundtasks()
   statusLED(false);
 
   runningBackgroundTasks=false;
+  STOP_TIMER(BACKGROUND_TASKS);
 }

@@ -53,7 +53,7 @@ boolean Plugin_035(byte function, struct EventStruct *event, String& string)
 
     case PLUGIN_INIT:
       {
-        int irPin = Settings.TaskDevicePin1[event->TaskIndex];
+        int irPin = CONFIG_PIN1;
         if (Plugin_035_irSender == 0 && irPin != -1)
         {
           addLog(LOG_LEVEL_INFO, F("INIT: IR TX"));
@@ -497,7 +497,7 @@ bool  parseStringAndSendAirCon(const uint16_t irType, const String& str) {
       Plugin_035_irSender->sendDaikin(reinterpret_cast<uint8_t *>(state));
       break;
 #endif
-#if MITSUBISHI_AC
+#if SEND_MITSUBISHI_AC
     case MITSUBISHI_AC:
       Plugin_035_irSender->sendMitsubishiAC(reinterpret_cast<uint8_t *>(state));
       break;
