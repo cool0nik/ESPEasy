@@ -3,6 +3,9 @@
 //#################################### Plugin 016: Input IR #############################################
 //#######################################################################################################
 
+// Uncomment the following define to enable the extended decoding of AC messages (20K bytes in flash)
+// Example of those messages: "Mesg Desc.: Power: On, Fan: 5 (AUTO), Mode: 3 (HEAT), Temp: 22C, Zone Follow: Off, Sensor Temp: Ignored"
+//#define P016_Extended_Decoding
 
 #ifdef ESP8266  // Needed for precompile issues.
 #include <IRremoteESP8266.h>
@@ -11,19 +14,24 @@
 #include <IRrecv.h>
 #include <IRutils.h>
 
-
-// The following are only needed for extended decoding of A/C Messages
+#ifdef P016_Extended_Decoding // The following are only needed for extended decoding of A/C Messages
+#include <ir_Coolix.h>
 #include <ir_Daikin.h>
 #include <ir_Fujitsu.h>
 #include <ir_Gree.h>
 #include <ir_Haier.h>
+#include <ir_Hitachi.h>
 #include <ir_Kelvinator.h>
 #include <ir_Midea.h>
 #include <ir_Mitsubishi.h>
 #include <ir_Panasonic.h>
 #include <ir_Samsung.h>
+#include <ir_Tcl.h>
+#include <ir_Teco.h>
 #include <ir_Toshiba.h>
-#include <ir_Coolix.h>
+#include <ir_Vestel.h>
+#include <ir_Whirlpool.h>
+#endif
 
 #define PLUGIN_016
 #define PLUGIN_ID_016         16
@@ -53,14 +61,14 @@ const uint16_t kCaptureBufferSize = 1024;
 // So, choosing the best kTimeout value for your use particular case is
 // quite nuanced. Good luck and happy hunting.
 // NOTE: Don't exceed kMaxTimeoutMs. Typically 130ms.
-#if DECODE_AC
+//#if DECODE_AC
 // Some A/C units have gaps in their protocols of ~40ms. e.g. Kelvinator
 // A value this large may swallow repeats of some protocols
 const uint8_t P016_TIMEOUT = 50;
-#else   // DECODE_AC
+//#else   // DECODE_AC
 // Suits most messages, while not swallowing many repeats.
-const uint8_t P016_TIMEOUT = 15;
-#endif  // DECODE_AC
+//const uint8_t P016_TIMEOUT = 15;
+//#endif  // DECODE_AC
 // Alternatives:
 // const uint8_t kTimeout = 90;
 // Suits messages with big gaps like XMP-1 & some aircon units, but can
@@ -138,7 +146,7 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
         int irPin = CONFIG_PIN1;
         if (irReceiver == 0 && irPin != -1)
         {
-          serialPrintln(F("IR Init"));
+          serialPrintln(F("IR RX Init"));
           irReceiver = new IRrecv(irPin, kCaptureBufferSize, P016_TIMEOUT, true);
           irReceiver->setUnknownThreshold(kMinUnknownSize); // Ignore messages with less than minimum on or off pulses.
           irReceiver->enableIRIn(); // Start the receiver
@@ -165,27 +173,43 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
         success = true;
         break;
       }
-      
+        case PLUGIN_WEBFORM_LOAD:
+      {
+        addRowLabel(F("Info"));
+        addHtml(F("Check serial or web log for replay solutions via Communication - IR Transmit plugin"));
+
+        success = true;
+        break;
+      }
 
     case PLUGIN_TEN_PER_SECOND:
       {
         if (irReceiver->decode(&results))
         {
-          unsigned long IRcode = results.value;
-          irReceiver->resume();
-          UserVar[event->BaseVarIndex] = (IRcode & 0xFFFF);
-          UserVar[event->BaseVarIndex + 1] = ((IRcode >> 16) & 0xFFFF);
-          String description = "IR: ";
-          if (results.overflow)
-            description += F("WARNING: IR code is too big for buffer. This result shouldn't be trusted until this is resolved. Edit & increase CAPTURE_BUFFER_SIZE.\n");
-          // Display the basic output of what we found.
-          description += resultToHumanReadableBasic(&results);
-          addLog(LOG_LEVEL_INFO, description);
-          displayRawToReadableB32Hex();
+          yield(); // Feed the WDT after a time expensive decoding procedure
+          if (results.overflow){
+        addLog(LOG_LEVEL_INFO,  F("IR: WARNING, IR code is too big for buffer. Try pressing the transmiter button only momenteraly"));
+        success = false;
+        break; //Do not continue and risk hanging the ESP
+          }
 
+          
+          // Display the basic output of what we found.
+          if (results.decode_type != UNKNOWN) { 
+                addLog(LOG_LEVEL_INFO, String(F("IRSEND,")) + typeToString(results.decode_type, results.repeat) + ',' + resultToHexidecimal(&results)); //Show the appropriate command to the user, so he can replay the message via P035
+          } 
+          //Check if a solution for RAW2 is found and if not give the user the option to access the timings info.
+          if (results.decode_type == UNKNOWN && !displayRawToReadableB32Hex()){
+           addLog(LOG_LEVEL_INFO, F("IR: No replay solutions found! Press button again or try RAW encoding (timmings are in the serial output)"));   
+           serialPrint(String(F("IR: RAW TIMINGS: ")) + resultToSourceCode(&results));
+           yield(); // Feed the WDT as it can take a while to print.
+           //addLog(LOG_LEVEL_DEBUG,(String(F("IR: RAW TIMINGS: ")) + resultToSourceCode(&results))); // Output the results as RAW source code //not showing up nicely in the web log
+          }
+
+#ifdef P016_Extended_Decoding
           // Display any extra A/C info if we have it.
           // Display the human readable state of an A/C message if we can.
-          description = "";
+          String description = "";
 #if DECODE_DAIKIN
   if (results.decode_type == DAIKIN) {
     IRDaikinESP ac(0);
@@ -193,6 +217,13 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
     description = ac.toString();
   }
 #endif  // DECODE_DAIKIN
+#if DECODE_DAIKIN2
+  if (results.decode_type == DAIKIN2) {
+    IRDaikin2 ac(0);
+    ac.setRaw(results.state);
+    description = ac.toString();
+  }
+#endif // DECODE_DAIKIN2
 #if DECODE_FUJITSU_AC
   if (results.decode_type == FUJITSU_AC) {
     IRFujitsuAC ac(0);
@@ -269,15 +300,51 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
     IRPanasonicAc ac(0);
     ac.setRaw(results.state);
     description = ac.toString();
-  }
+  } 
 #endif  // DECODE_PANASONIC_AC
+#if DECODE_HITACHI_AC
+  if (results.decode_type == HITACHI_AC) {
+    IRHitachiAc ac(0);
+    ac.setRaw(results.state);
+    description = ac.toString();
+  }
+#endif  // DECODE_HITACHI_AC
+#if DECODE_WHIRLPOOL_AC
+  if (results.decode_type == WHIRLPOOL_AC) {
+    IRWhirlpoolAc ac(0);
+    ac.setRaw(results.state);
+    description = ac.toString();
+  }
+#endif  // DECODE_WHIRLPOOL_AC
+#if DECODE_VESTEL_AC
+  if (results.decode_type == VESTEL_AC) {
+    IRVestelAc ac(0);
+    ac.setRaw(results.value);  // Like Coolix, use value instead of state.
+    description = ac.toString();
+  }
+#endif  // DECODE_VESTEL_AC
+#if DECODE_TECO
+  if (results.decode_type == TECO) {
+    IRTecoAc ac(0);
+    ac.setRaw(results.value);  // Like Coolix, use value instead of state.
+    description = ac.toString();
+  }
+#endif  // DECODE_TECO
+#if DECODE_TCL112AC
+  if (results.decode_type == TCL112AC) {
+    IRTcl112Ac ac(0);
+    ac.setRaw(results.state);
+    description = ac.toString();
+  }
+#endif // DECODE_TCL112AC
+
   // If we got a human-readable description of the message, display it.
           if (description != "") addLog(LOG_LEVEL_INFO, description);
-
-          // Output RAW timing info of the result.
-          //log += resultToTimingInfo(&results);  //not showing up nicely in the web log... Maybe send them to serial?
-          // Output the results as source code
-          //  log += resultToSourceCode(&results); //not showing up nicely in the web log... Maybe send them to serial?
+#endif  // Extended Messages
+          
+          unsigned long IRcode = results.value;
+          UserVar[event->BaseVarIndex] = (IRcode & 0xFFFF);
+          UserVar[event->BaseVarIndex + 1] = ((IRcode >> 16) & 0xFFFF);
           sendData(event);
         }
         success = true;
@@ -288,12 +355,12 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
 }
 
 
-#define PCT_TOLERANCE       7u
-#define pct_tolerance(v)    ((v) / (100u / PCT_TOLERANCE))
+#define PCT_TOLERANCE       8u //Percent tolerance
+#define pct_tolerance(v)    ((v) / (100u / PCT_TOLERANCE)) //Tolerance % is calculated as the delta between any original timing, and the result after encoding and decoding
 //#define MIN_TOLERANCE       10u
 //#define get_tolerance(v)    (pct_tolerance(v) > MIN_TOLERANCE? pct_tolerance(v) : MIN_TOLERANCE)
 #define get_tolerance(v)    (pct_tolerance(v))
-#define MIN_VIABLE_DIV      40u
+#define MIN_VIABLE_DIV      40u  // Minimum viable timing denominator 
 #define to_32hex(c)         ((c) < 10 ? (c) + '0' : (c) + 'A' - 10)
 
 // This function attempts to convert the raw IR timings buffer to a short string that can be sent over as
@@ -305,14 +372,14 @@ boolean Plugin_016(byte function, struct EventStruct *event, String& string)
 //
 // Author: Gilad Raz (jazzgil)  23sep2018
 
-void displayRawToReadableB32Hex() {
+boolean displayRawToReadableB32Hex() {
     String line;
     uint16_t div[2];
 
     // print the values: either pulses or blanks
     for (uint16_t i = 1; i < results.rawlen; i++)
         line += uint64ToString(results.rawbuf[i] * RAWTICK, 10) + ",";
-    addLog(LOG_LEVEL_DEBUG, line);
+    addLog(LOG_LEVEL_DEBUG, line); //Display the RAW timings
 
     // Find a common denominator divisor for odd indexes (pulses) and then even indexes (blanks).
     for (uint16_t p = 0; p < 2; p++) {
@@ -350,13 +417,13 @@ void displayRawToReadableB32Hex() {
             }
         }
         if (bstDiv == 0xFFFFU) {
-            addLog(LOG_LEVEL_INFO, F("IR2:No proper divisor found. Try again..."));
-            return;
+            //addLog(LOG_LEVEL_INFO, F("IR2: No proper divisor found. Try again..."));
+            return false;
         }
         div[p] = bstDiv;
 
-        line = String(p? "Blank: " : "Pulse: ") + " divisor=" + uint64ToString(bstDiv, 10)
-            +"  avgErr=" + uint64ToString(bstAvg, 10) + " avgMul="+ uint64ToString((uint16_t)bstMul, 10)
+        line = String(p? String(F("Blank: ")) : String(F("Pulse: "))) + String(F(" divisor=")) + uint64ToString(bstDiv, 10)
+            +String(F("  avgErr=")) + uint64ToString(bstAvg, 10) + String(F(" avgMul="))+ uint64ToString((uint16_t)bstMul, 10)
             +'.'+ ((char)((bstMul - (uint16_t)bstMul) * 10 )+ '0');
         addLog(LOG_LEVEL_DEBUG, line);
     }
@@ -383,8 +450,8 @@ void displayRawToReadableB32Hex() {
             s += 2;
         }
         if (iOut + 5 > sizeof(out) || tmOut[d] >= 32*32 || tmOut[d+1] >= 32*32 || vals >= 64) {
-            addLog(LOG_LEVEL_INFO, F("IR2: Raw code too long. Try again..."));
-            return;
+            //addLog(LOG_LEVEL_INFO, F("IR2: Raw code too long. Try again..."));
+                return false;
         }
 
         if (vals > 4 || (vals == 4 && (tmOut[d] >= 32 || tmOut[d+1] >= 32))) {
@@ -399,8 +466,9 @@ void displayRawToReadableB32Hex() {
         iOut = storeB32Hex(out, iOut, tmOut[d++]);
 
     out[iOut] = 0;
-    line = "IRSEND,RAW2," + String(out) + ",38," + uint64ToString(div[0], 10) +','+ uint64ToString(div[1], 10);
+    line = String(F("IRSEND,RAW2,")) + String(out) + String(F(",38,")) + uint64ToString(div[0], 10) +','+ uint64ToString(div[1], 10);
     addLog(LOG_LEVEL_INFO, line);
+    return true;
 }
 
 unsigned int storeB32Hex(char out[], unsigned int iOut, unsigned int val) {

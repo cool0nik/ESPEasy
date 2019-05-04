@@ -22,6 +22,14 @@ TEST(TestSendCoolix, SendDataOnly) {
       "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
       "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
       "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s5040"
+      "m4480s4480"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
       "m560s5040",
       irsend.outputStr());
 
@@ -35,12 +43,28 @@ TEST(TestSendCoolix, SendDataOnly) {
       "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560"
       "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560"
       "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680"
+      "m560s5040"
+      "m4480s4480"
+      "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560"
+      "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680"
+      "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680"
+      "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560"
+      "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560"
+      "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680"
       "m560s5040",
       irsend.outputStr());
 
   irsend.reset();
   irsend.sendCOOLIX(0xFFFFFF);
   EXPECT_EQ(
+      "m4480s4480"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s5040"
       "m4480s4480"
       "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
       "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
@@ -117,12 +141,34 @@ TEST(TestSendCoolix, SendUnusualSize) {
       "m4480s4480"
       "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
       "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
+      "m560s5040"
+      "m4480s4480"
+      "m560s560m560s560m560s560m560s560m560s560m560s560m560s560m560s560"
+      "m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680m560s1680"
       "m560s5040",
       irsend.outputStr());
 
   irsend.reset();
   irsend.sendCOOLIX(0x1234567890ABCDEF, 64);
   EXPECT_EQ(
+      "m4480s4480"
+      "m560s560m560s560m560s560m560s1680m560s560m560s560m560s1680m560s560"
+      "m560s1680m560s1680m560s1680m560s560m560s1680m560s1680m560s560m560s1680"
+      "m560s560m560s560m560s1680m560s1680m560s560m560s1680m560s560m560s560"
+      "m560s1680m560s1680m560s560m560s560m560s1680m560s560m560s1680m560s1680"
+      "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s1680m560s560"
+      "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s560m560s1680"
+      "m560s560m560s1680m560s1680m560s1680m560s1680m560s560m560s560m560s560"
+      "m560s1680m560s560m560s560m560s560m560s560m560s1680m560s1680m560s1680"
+      "m560s1680m560s560m560s560m560s1680m560s560m560s560m560s560m560s560"
+      "m560s560m560s1680m560s1680m560s560m560s1680m560s1680m560s1680m560s1680"
+      "m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s1680"
+      "m560s560m560s1680m560s560m560s1680m560s560m560s1680m560s560m560s560"
+      "m560s1680m560s1680m560s560m560s560m560s1680m560s1680m560s560m560s1680"
+      "m560s560m560s560m560s1680m560s1680m560s560m560s560m560s1680m560s560"
+      "m560s1680m560s1680m560s1680m560s560m560s1680m560s1680m560s1680m560s1680"
+      "m560s560m560s560m560s560m560s1680m560s560m560s560m560s560m560s560"
+      "m560s5040"
       "m4480s4480"
       "m560s560m560s560m560s560m560s1680m560s560m560s560m560s1680m560s560"
       "m560s1680m560s1680m560s1680m560s560m560s1680m560s1680m560s560m560s1680"
@@ -411,7 +457,7 @@ TEST(TestCoolixACClass, HumanReadable) {
 
   // Initial starting point.
   EXPECT_EQ(
-      "Power: On, Fan: 5 (AUTO), Mode: 2 (AUTO), Temp: 25C, "
+      "Power: On, Mode: 2 (AUTO), Fan: 5 (AUTO), Temp: 25C, "
       "Zone Follow: Off, Sensor Temp: Ignored",
       ircoolix.toString());
 
@@ -420,11 +466,11 @@ TEST(TestCoolixACClass, HumanReadable) {
   ircoolix.setMode(kCoolixCool);
   ircoolix.setFan(kCoolixFanMin);
   EXPECT_EQ(
-      "Power: On, Fan: 4 (MIN), Mode: 0 (COOL), Temp: 22C, "
+      "Power: On, Mode: 0 (COOL), Fan: 4 (MIN), Temp: 22C, "
       "Zone Follow: On, Sensor Temp: 24C",
       ircoolix.toString());
   ircoolix.setSwing();
-  EXPECT_EQ("Power: On, Fan: 3 (UNKNOWN), Swing: Toggle", ircoolix.toString());
+  EXPECT_EQ("Power: On, Swing: Toggle", ircoolix.toString());
   ircoolix.setPower(false);
   EXPECT_EQ("Power: Off", ircoolix.toString());
 }
@@ -434,12 +480,113 @@ TEST(TestCoolixACClass, KnownExamples) {
 
   ircoolix.setRaw(0b101100101011111111100100);
   EXPECT_EQ(
-      "Power: On, Fan: 5 (AUTO), Mode: 4 (FAN), Zone Follow: Off, "
+      "Power: On, Mode: 4 (FAN), Fan: 5 (AUTO), Zone Follow: Off, "
       "Sensor Temp: Ignored",
       ircoolix.toString());
   ircoolix.setRaw(0b101100101001111100000000);
   EXPECT_EQ(
-      "Power: On, Fan: 4 (MIN), Mode: 0 (COOL), Temp: 17C, "
+      "Power: On, Mode: 0 (COOL), Fan: 4 (MIN), Temp: 17C, "
       "Zone Follow: Off, Sensor Temp: Ignored",
       ircoolix.toString());
+}
+
+TEST(TestCoolixACClass, Issue579FanAuto0) {
+  IRCoolixAC ircoolix(0);
+
+  ircoolix.setRaw(0xB21F28);
+  EXPECT_EQ(
+      "Power: On, Mode: 2 (AUTO), Fan: 0 (AUTO0), Temp: 20C, "
+      "Zone Follow: Off, Sensor Temp: Ignored",
+      ircoolix.toString());
+}
+
+TEST(TestCoolixACClass, RealCaptureExample) {
+  IRsendTest irsend(0);
+  IRrecv irrecv(0);
+
+  // From Issue #579
+  uint16_t powerOffRawData[199] = {
+      4444, 4434, 590, 1578, 698,  446,  590, 1578, 622, 1596, 622, 500,
+      644,  476,  644, 1548, 588,  532,  594, 530,  612, 1578, 590, 532,
+      588,  534,  672, 1518, 594,  1598, 590, 510,  612, 1580, 644, 480,
+      612,  1578, 644, 1548, 644,  1548, 594, 1598, 642, 506,  644, 1550,
+      644,  1548, 594, 1600, 644,  478,  644, 478,  642, 480,  644, 478,
+      642,  1548, 594, 530,  590,  532,  614, 1578, 644, 1548, 594, 1600,
+      588,  534,  566, 556,  588,  530,  590, 532,  586, 514,  612, 532,
+      588,  532,  590, 534,  588,  1578, 642, 1576, 642, 1550, 588, 1602,
+      588,  1580, 642, 4712, 4546, 4406, 588, 1606, 642, 478,  644, 1550,
+      590,  1604, 588, 534,  586,  532,  586, 1582, 642, 480,  642, 480,
+      668,  1550, 642, 480,  642,  478,  642, 1552, 612, 1578, 586, 538,
+      588,  1580, 674, 472,  590,  1602, 586, 1580, 618, 1576, 642, 1548,
+      594,  530,  590, 1584, 608,  1578, 644, 1550, 642, 480,  642, 478,
+      642,  480,  642, 480,  642,  1550, 590, 530,  592, 528,  592, 1602,
+      642,  1548, 592, 1604, 586,  584,  642, 480,  640, 480,  640, 480,
+      642,  480,  642, 480,  642,  480,  642, 480,  642, 1552, 590, 1604,
+      588,  1578, 642, 1552, 640,  1550, 592};  // COOLIX B27BE0
+
+  irsend.begin();
+
+  irsend.reset();
+
+  irsend.sendRaw(powerOffRawData, 199, 38000);
+  irsend.makeDecodeResult();
+  ASSERT_TRUE(irrecv.decode(&irsend.capture));
+  EXPECT_EQ(COOLIX, irsend.capture.decode_type);
+  EXPECT_EQ(kCoolixBits, irsend.capture.bits);
+  EXPECT_EQ(kCoolixOff, irsend.capture.value);
+  EXPECT_EQ(0x0, irsend.capture.address);
+  EXPECT_EQ(0x0, irsend.capture.command);
+}
+
+
+// Tests to debug/fix:
+//   https://github.com/markszabo/IRremoteESP8266/issues/624
+TEST(TestCoolixACClass, Issue624HandleSpecialStatesBetter) {
+  IRCoolixAC ac(0);
+  ac.begin();
+  // Default
+  EXPECT_EQ(
+      "Power: On, Mode: 2 (AUTO), Fan: 5 (AUTO), Temp: 25C, Zone Follow: Off, "
+      "Sensor Temp: Ignored",
+      ac.toString());
+  EXPECT_EQ(0xB2BFC8, ac.getRaw());
+  // Change of settings.
+  ac.setPower(true);
+  ac.setTemp(24);
+  ac.setMode(kCoolixCool);
+  ac.setFan(kCoolixFanAuto);
+  EXPECT_EQ(
+      "Power: On, Mode: 0 (COOL), Fan: 5 (AUTO), Temp: 24C, Zone Follow: Off, "
+      "Sensor Temp: Ignored",
+      ac.toString());
+  EXPECT_EQ(0xB2BF40, ac.getRaw());
+  // Turn the unit off.
+  ac.setPower(false);
+  EXPECT_EQ(
+      "Power: Off",
+      ac.toString());
+  EXPECT_EQ(kCoolixOff, ac.getRaw());
+  // Repeat change of settings.
+  ac.setPower(true);
+  ac.setTemp(24);
+  ac.setMode(kCoolixCool);
+  ac.setFan(kCoolixFanAuto);
+  EXPECT_EQ(
+      "Power: On, Mode: 0 (COOL), Fan: 5 (AUTO), Temp: 24C, Zone Follow: Off, "
+      "Sensor Temp: Ignored",
+      ac.toString());
+  EXPECT_EQ(0xB2BF40, ac.getRaw());
+
+  // Now test if we setRaw() a special state first.
+  ac.setRaw(kCoolixSwing);
+  // Repeat change of settings.
+  ac.setPower(true);
+  ac.setTemp(24);
+  ac.setMode(kCoolixCool);
+  ac.setFan(kCoolixFanAuto);
+  EXPECT_EQ(
+      "Power: On, Mode: 0 (COOL), Fan: 5 (AUTO), Temp: 24C, Zone Follow: Off, "
+      "Sensor Temp: Ignored",
+      ac.toString());
+  EXPECT_EQ(0xB2BF40, ac.getRaw());
 }

@@ -1,5 +1,65 @@
 # Release Notes
 
+## _v2.5.6 (20190316)_
+
+**[Bug Fixes]**
+- Fix Coolix A/C Class to handle special states better. (#633, #624)
+
+**[Features]**
+- Fix case style for recent A/C protocols. (#631)
+- Update `IRsend::send()` to include all simple protocols. (#629, #628)
+- Experimental basic support for 112 bit TCL AC messages (#627, #619)
+- Add support for TECO AC (#622)
+- Experimental support for Samsung 36 bit protocol (#625, #621)
+
+**[Misc]**
+- Set Coolix to default to 1 repeat. (#637, #636, #624, #439)
+- Set Daikin2 modulation to 36.7kHz. (#635)
+- Refactor IRVestelAC class to use portable code. (#617)
+- Adjust Daikin2 timings and tolerance. (#616, #582)
+
+
+## _v2.5.5 (20190207)_
+
+**[Bug Fixes]**
+- Fix decoding of Samsung A/C Extended messages. (#610)
+- Fix IRMQTTServer example to work with GPIO0 as IR_RX (#608)
+- Fix incorrect #define usage. (#597, #596)
+
+**[Features]**
+- Add deep decoding/construction of Daikin2 messages (#600)
+- Added Old Vestel A/C support (56 Bits) with full functions. (#607)
+
+**[Misc]**
+- Add ControlSamsungAC example code. (#599)
+- Add how to send a state/air-con to IRsendDemo.ino (#594)
+
+
+## _v2.5.4 (20190102)_
+
+**[Features]**
+- Experimental basic support for 39 Byte Daikin A/C (#583)
+- Handle send() repeats in A/C classes. Improve Coolix support. (#580)
+- Add optional RX pin pullup and dump raw messages in IRMQTTServer.ino (#589)
+
+**[Misc]**
+- Make auto_analyse_raw_data.py work with Python3 (#581)
+- Update CI/travis config due to esp8266 core 2.5.0 changes (#591)
+
+
+## _v2.5.3 (20181123)_
+
+**[Features]**
+- Add deep support for the Hitachi 28-Byte A/C Protocol (#563)
+- Deep decoding for Whirlpool A/C (#572)
+- Improve security options for IRMQTTServer example. (#575)
+- Require a changed firmware password before upload. (#576)
+
+**[Misc]**
+- Add missing '}' in output of Auto analyse. (#562)
+- Make A/C example code a bit more simple. (#571)
+
+
 ## _v2.5.2 (20181021)_
 
 **[Bug Fixes]**

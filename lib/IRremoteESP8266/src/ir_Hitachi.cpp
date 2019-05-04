@@ -5,6 +5,7 @@
 // * Hitachi RAS-35THA6 remote
 //
 
+#include "ir_Hitachi.h"
 #include <algorithm>
 #ifndef ARDUINO
 #include <string>
@@ -29,7 +30,7 @@ const uint16_t kHitachiAc1HdrSpace = 3400;
 const uint16_t kHitachiAcBitMark = 400;
 const uint16_t kHitachiAcOneSpace = 1250;
 const uint16_t kHitachiAcZeroSpace = 500;
-const uint32_t kHitachiAcMinGap = 100000;  // Completely made up value.
+const uint32_t kHitachiAcMinGap = kDefaultMessageGap;  // Just a guess.
 
 #if (SEND_HITACHI_AC || SEND_HITACHI_AC2)
 // Send a Hitachi A/C message.
@@ -104,6 +105,222 @@ void IRsend::sendHitachiAC2(unsigned char data[], uint16_t nbytes,
   sendHitachiAC(data, nbytes, repeat);
 }
 #endif  // SEND_HITACHI_AC2
+
+// Class for handling the remote control oh a Hitachi 28 byte A/C message.
+// Inspired by:
+// https://github.com/ToniA/arduino-heatpumpir/blob/master/HitachiHeatpumpIR.cpp
+
+IRHitachiAc::IRHitachiAc(uint16_t pin) : _irsend(pin) { stateReset(); }
+
+void IRHitachiAc::stateReset() {
+  remote_state[0] = 0x80;
+  remote_state[1] = 0x08;
+  remote_state[2] = 0x0C;
+  remote_state[3] = 0x02;
+  remote_state[4] = 0xFD;
+  remote_state[5] = 0x80;
+  remote_state[6] = 0x7F;
+  remote_state[7] = 0x88;
+  remote_state[8] = 0x48;
+  remote_state[9] = 0x10;
+  for (uint8_t i = 10; i < kHitachiAcStateLength; i++) remote_state[i] = 0x00;
+  remote_state[14] = 0x60;
+  remote_state[15] = 0x60;
+  remote_state[24] = 0x80;
+  setTemp(23);
+}
+
+void IRHitachiAc::begin() { _irsend.begin(); }
+
+uint8_t IRHitachiAc::calcChecksum(const uint8_t state[],
+                                  const uint16_t length) {
+  int8_t sum = 62;
+  for (uint16_t i = 0; i < length - 1; i++) sum -= reverseBits(state[i], 8);
+  return reverseBits((uint8_t)sum, 8);
+}
+
+void IRHitachiAc::checksum(const uint16_t length) {
+  remote_state[length - 1] = calcChecksum(remote_state, length);
+}
+
+bool IRHitachiAc::validChecksum(const uint8_t state[], const uint16_t length) {
+  if (length < 2) return true;  // Assume true for lengths that are too short.
+  return (state[length - 1] == calcChecksum(state, length));
+}
+
+uint8_t *IRHitachiAc::getRaw() {
+  checksum();
+  return remote_state;
+}
+
+void IRHitachiAc::setRaw(const uint8_t new_code[], const uint16_t length) {
+  for (uint8_t i = 0; i < length && i < kHitachiAcStateLength; i++)
+    remote_state[i] = new_code[i];
+}
+
+#if SEND_HITACHI_AC
+void IRHitachiAc::send(const uint16_t repeat) {
+  checksum();
+  _irsend.sendHitachiAC(remote_state, kHitachiAcStateLength, repeat);
+}
+#endif  // SEND_HITACHI_AC
+
+bool IRHitachiAc::getPower() { return (remote_state[17] & 0x01); }
+
+void IRHitachiAc::setPower(const bool on) {
+  if (on)
+    remote_state[17] |= 0x01;
+  else
+    remote_state[17] &= 0xFE;
+}
+
+void IRHitachiAc::on() { setPower(true); }
+
+void IRHitachiAc::off() { setPower(false); }
+
+uint8_t IRHitachiAc::getMode() { return reverseBits(remote_state[10], 8); }
+
+void IRHitachiAc::setMode(const uint8_t mode) {
+  uint8_t newmode = mode;
+  switch (mode) {
+    case kHitachiAcFan:
+      // Fan mode sets a special temp.
+      setTemp(64);
+      break;
+    case kHitachiAcAuto:
+    case kHitachiAcHeat:
+    case kHitachiAcCool:
+    case kHitachiAcDry:
+      break;
+    default:
+      newmode = kHitachiAcAuto;
+  }
+  remote_state[10] = reverseBits(newmode, 8);
+  if (mode != kHitachiAcFan) setTemp(_previoustemp);
+  setFan(getFan());  // Reset the fan speed after the mode change.
+}
+
+uint8_t IRHitachiAc::getTemp() { return reverseBits(remote_state[11], 8) >> 1; }
+
+void IRHitachiAc::setTemp(const uint8_t celsius) {
+  uint8_t temp;
+  if (celsius != 64) _previoustemp = celsius;
+  switch (celsius) {
+    case 64:
+      temp = celsius;
+      break;
+    default:
+      temp = std::min(celsius, kHitachiAcMaxTemp);
+      temp = std::max(temp, kHitachiAcMinTemp);
+  }
+  remote_state[11] = reverseBits(temp << 1, 8);
+  if (temp == kHitachiAcMinTemp)
+    remote_state[9] = 0x90;
+  else
+    remote_state[9] = 0x10;
+}
+
+uint8_t IRHitachiAc::getFan() { return reverseBits(remote_state[13], 8); }
+
+void IRHitachiAc::setFan(const uint8_t speed) {
+  uint8_t fanmin = kHitachiAcFanAuto;
+  uint8_t fanmax = kHitachiAcFanHigh;
+  switch (getMode()) {
+    case kHitachiAcDry:  // Only 2 x low speeds in Dry mode.
+      fanmin = kHitachiAcFanLow;
+      fanmax = kHitachiAcFanLow + 1;
+      break;
+    case kHitachiAcFan:
+      fanmin = kHitachiAcFanLow;  // No Auto in Fan mode.
+      break;
+  }
+  uint8_t newspeed = std::max(speed, fanmin);
+  newspeed = std::min(newspeed, fanmax);
+  remote_state[13] = reverseBits(newspeed, 8);
+}
+
+bool IRHitachiAc::getSwingVertical() { return remote_state[14] & 0x80; }
+
+void IRHitachiAc::setSwingVertical(const bool on) {
+  if (on)
+    remote_state[14] |= 0x80;
+  else
+    remote_state[14] &= 0x7F;
+}
+
+bool IRHitachiAc::getSwingHorizontal() { return remote_state[15] & 0x80; }
+
+void IRHitachiAc::setSwingHorizontal(const bool on) {
+  if (on)
+    remote_state[15] |= 0x80;
+  else
+    remote_state[15] &= 0x7F;
+}
+
+// Convert the internal state into a human readable string.
+#ifdef ARDUINO
+String IRHitachiAc::toString() {
+  String result = "";
+#else
+std::string IRHitachiAc::toString() {
+  std::string result = "";
+#endif  // ARDUINO
+  result += F("Power: ");
+  if (getPower())
+    result += F("On");
+  else
+    result += F("Off");
+  result += F(", Mode: ");
+  result += uint64ToString(getMode());
+  switch (getMode()) {
+    case kHitachiAcAuto:
+      result += F(" (AUTO)");
+      break;
+    case kHitachiAcCool:
+      result += F(" (COOL)");
+      break;
+    case kHitachiAcHeat:
+      result += F(" (HEAT)");
+      break;
+    case kHitachiAcDry:
+      result += F(" (DRY)");
+      break;
+    case kHitachiAcFan:
+      result += F(" (FAN)");
+      break;
+    default:
+      result += F(" (UNKNOWN)");
+  }
+  result += F(", Temp: ");
+  result += uint64ToString(getTemp());
+  result += F("C, Fan: ");
+  result += uint64ToString(getFan());
+  switch (getFan()) {
+    case kHitachiAcFanAuto:
+      result += F(" (AUTO)");
+      break;
+    case kHitachiAcFanLow:
+      result += F(" (LOW)");
+      break;
+    case kHitachiAcFanHigh:
+      result += F(" (HIGH)");
+      break;
+    default:
+      result += F(" (UNKNOWN)");
+      break;
+  }
+  result += F(", Swing (Vertical): ");
+  if (getSwingVertical())
+    result += F("On");
+  else
+    result += F("Off");
+  result += F(", Swing (Horizontal): ");
+  if (getSwingHorizontal())
+    result += F("On");
+  else
+    result += F("Off");
+  return result;
+}
 
 #if (DECODE_HITACHI_AC || DECODE_HITACHI_AC1 || DECODE_HITACHI_AC2)
 // Decode the supplied Hitachi A/C message.
@@ -184,6 +401,9 @@ bool IRrecv::decodeHitachiAC(decode_results *results, uint16_t nbits,
       default:
         return false;
     }
+    if (dataBitsSoFar / 8 == kHitachiAcStateLength &&
+        !IRHitachiAc::validChecksum(results->state, kHitachiAcStateLength))
+      return false;
   }
 
   // Success

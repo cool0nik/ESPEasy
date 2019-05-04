@@ -1,12 +1,30 @@
 #ifndef ESPEASY_GLOBALS_H_
 #define ESPEASY_GLOBALS_H_
 
-#include "_Plugin_Helper.h"
-
-#ifndef CORE_2_5_0
+#ifndef CORE_POST_2_5_0
   #define STR_HELPER(x) #x
   #define STR(x) STR_HELPER(x)
 #endif
+
+#include <cstddef>
+#include "FS.h"
+
+// ********************************************************************************
+// Check struct sizes at compile time
+// Usage:
+//   struct foo
+//   {
+//     char bla[16];
+//   };
+//
+//   check_size<foo, 8>();
+// ********************************************************************************
+template <typename ToCheck, std::size_t ExpectedSize, std::size_t RealSize = sizeof(ToCheck)>
+void check_size() {
+  static_assert(ExpectedSize == RealSize, "");
+}
+
+
 
 // ********************************************************************************
 //   User specific configuration
@@ -37,8 +55,14 @@
 #define DEFAULT_IPRANGE_LOW  "0.0.0.0"          // Allowed IP range to access webserver
 #define DEFAULT_IPRANGE_HIGH "255.255.255.255"  // Allowed IP range to access webserver
 #define DEFAULT_IP_BLOCK_LEVEL 1                // 0: ALL_ALLOWED  1: LOCAL_SUBNET_ALLOWED  2: ONLY_IP_RANGE_ALLOWED
+#define DEFAULT_ADMIN_USERNAME  "admin"
 
 #define DEFAULT_WIFI_CONNECTION_TIMEOUT  10000  // minimum timeout in ms for WiFi to be connected.
+#define DEFAULT_WIFI_FORCE_BG_MODE       false  // when set, only allow to connect in 802.11B or G mode (not N)
+#define DEFAULT_WIFI_RESTART_WIFI_CONN_LOST  false // Perform wifi off and on when connection was lost.
+#define DEFAULT_ECO_MODE                 false   // When set, make idle calls between executing tasks.
+#define DEFAULT_WIFI_NONE_SLEEP          false  // When set, the wifi will be set to no longer sleep (more power used and need reboot to reset mode)
+#define DEFAULT_GRATUITOUS_ARD           false  // When set, the node will send periodical gratuitous ARP packets to announce itself.
 
 // --- Default Controller ------------------------------------------------------------------------------
 #define DEFAULT_CONTROLLER   false              // true or false enabled or disabled, set 1st controller defaults
@@ -212,25 +236,34 @@
 #define TIMER_30SEC                         4
 #define TIMER_MQTT                          5
 #define TIMER_STATISTICS                    6
-#define TIMER_MQTT_DELAY_QUEUE              7
-#define TIMER_C001_DELAY_QUEUE              8
-#define TIMER_C003_DELAY_QUEUE              9
-#define TIMER_C004_DELAY_QUEUE             10
-#define TIMER_C007_DELAY_QUEUE             11
-#define TIMER_C008_DELAY_QUEUE             12
-#define TIMER_C009_DELAY_QUEUE             13
-#define TIMER_C010_DELAY_QUEUE             14
-#define TIMER_C011_DELAY_QUEUE             15
-#define TIMER_C012_DELAY_QUEUE             16
-#define TIMER_C013_DELAY_QUEUE             17
+#define TIMER_GRATUITOUS_ARP                7
+#define TIMER_MQTT_DELAY_QUEUE              8
+#define TIMER_C001_DELAY_QUEUE              9
+#define TIMER_C003_DELAY_QUEUE             10
+#define TIMER_C004_DELAY_QUEUE             11
+#define TIMER_C007_DELAY_QUEUE             12
+#define TIMER_C008_DELAY_QUEUE             13
+#define TIMER_C009_DELAY_QUEUE             14
+#define TIMER_C010_DELAY_QUEUE             15
+#define TIMER_C011_DELAY_QUEUE             16
+#define TIMER_C012_DELAY_QUEUE             17
+#define TIMER_C013_DELAY_QUEUE             18
+#define TIMER_C014_DELAY_QUEUE             19
+#define TIMER_C015_DELAY_QUEUE             20
+#define TIMER_C016_DELAY_QUEUE             21
+#define TIMER_C017_DELAY_QUEUE             22
+#define TIMER_C018_DELAY_QUEUE             23
+#define TIMER_C019_DELAY_QUEUE             24
+#define TIMER_C020_DELAY_QUEUE             25
 
-#define TIMING_STATS_THRESHOLD         100000
+#define TIMING_STATS_THRESHOLD             100000
+#define TIMER_GRATUITOUS_ARP_MAX           5000
 
 // Minimum delay between messages for a controller to send in msec.
 #define CONTROLLER_DELAY_QUEUE_DELAY_MAX   3600000
 #define CONTROLLER_DELAY_QUEUE_DELAY_DFLT  100
 // Queue length for controller messages not yet sent.
-#define CONTROLLER_DELAY_QUEUE_DEPTH_MAX   25
+#define CONTROLLER_DELAY_QUEUE_DEPTH_MAX   50
 #define CONTROLLER_DELAY_QUEUE_DEPTH_DFLT  10
 // Number of retries to send a message by a controller.
 // N.B. Retries without a connection to wifi do not count as retry.
@@ -282,6 +315,14 @@
 #define CPLUGIN_TASK_CHANGE_NOTIFICATION   49
 #define CPLUGIN_INIT                       50
 #define CPLUGIN_UDP_IN                     51
+#define CPLUGIN_FLUSH                      52
+
+#define CPLUGIN_FLUSH                      52
+// new messages for autodiscover controller plugins (experimental) i.e. C014
+#define CPLUGIN_GOT_CONNECTED              53 // call after connected to mqtt server to publich device autodicover features
+#define CPLUGIN_GOT_INVALID                54 // should be called before major changes i.e. changing the device name to clean up data on the controller. !ToDo
+#define CPLUGIN_INTERVAL                   55 // call every interval loop
+#define CPLUGIN_ACKNOWLEDGE                56 // call for sending acknolages !ToDo done by direct function call in PluginCall() for now.
 
 #define CONTROLLER_HOSTNAME                 1
 #define CONTROLLER_IP                       2
@@ -426,6 +467,8 @@
   #define CONFIG_FILE_SIZE               131072
 #endif
 
+#define ZERO_FILL(S)  memset((S), 0, sizeof(S))
+#define ZERO_TERMINATE(S)  S[sizeof(S) - 1] = 0
 
 // Forward declaration
 struct ControllerSettingsStruct;
@@ -447,6 +490,8 @@ void setBitToUL(uint32_t& number, byte bitnr, bool value);
 
 void serialHelper_getGpioNames(struct EventStruct *event, bool rxOptional=false, bool txOptional=false);
 
+fs::File tryOpenFile(const String& fname, const String& mode);
+
 enum SettingsType {
   BasicSettings_Type = 0,
   TaskSettings_Type,
@@ -460,7 +505,9 @@ enum SettingsType {
 };
 String getSettingsTypeString(SettingsType settingsType);
 bool getSettingsParameters(SettingsType settingsType, int index, int& offset, int& max_size);
+#ifndef BUILD_MINIMAL_OTA
 bool showSettingsFileLayout = false;
+#endif
 
 /*
         To modify the stock configuration without changing this repo file :
@@ -550,6 +597,7 @@ bool showSettingsFileLayout = false;
   #include <WebServer.h>
   #include "SPIFFS.h"
   #include <rom/rtc.h>
+  #include "esp_wifi.h" // Needed to call ESP-IDF functions like esp_wifi_....
   WebServer WebServer(80);
   #ifdef FEATURE_MDNS
     #include <ESPmDNS.h>
@@ -599,9 +647,6 @@ const byte DNS_PORT = 53;
 IPAddress apIP(DEFAULT_AP_IP);
 DNSServer dnsServer;
 bool dnsServerActive = false;
-#ifdef FEATURE_MDNS
-MDNSResponder mdns;
-#endif
 
 // MQTT client
 WiFiClient mqtt;
@@ -666,17 +711,31 @@ bool safe_strncpy(char* dest, const char* source, size_t max_size);
 struct SecurityStruct
 {
   SecurityStruct() {
-    memset(WifiSSID, 0, sizeof(WifiSSID));
-    memset(WifiKey, 0, sizeof(WifiKey));
-    memset(WifiSSID2, 0, sizeof(WifiSSID2));
-    memset(WifiKey2, 0, sizeof(WifiKey2));
-    memset(WifiAPKey, 0, sizeof(WifiAPKey));
+    ZERO_FILL(WifiSSID);
+    ZERO_FILL(WifiKey);
+    ZERO_FILL(WifiSSID2);
+    ZERO_FILL(WifiKey2);
+    ZERO_FILL(WifiAPKey);
     for (byte i = 0; i < CONTROLLER_MAX; ++i) {
-      memset(ControllerUser[i], 0, sizeof(ControllerUser[i]));
-      memset(ControllerPassword[i], 0, sizeof(ControllerPassword[i]));
+      ZERO_FILL(ControllerUser[i]);
+      ZERO_FILL(ControllerPassword[i]);
     }
-    memset(Password, 0, sizeof(Password));
+    ZERO_FILL(Password);
   }
+
+  void validate() {
+    ZERO_TERMINATE(WifiSSID);
+    ZERO_TERMINATE(WifiKey);
+    ZERO_TERMINATE(WifiSSID2);
+    ZERO_TERMINATE(WifiKey2);
+    ZERO_TERMINATE(WifiAPKey);
+    for (byte i = 0; i < CONTROLLER_MAX; ++i) {
+      ZERO_TERMINATE(ControllerUser[i]);
+      ZERO_TERMINATE(ControllerPassword[i]);
+    }
+    ZERO_TERMINATE(Password);
+  }
+
   char          WifiSSID[32];
   char          WifiKey[64];
   char          WifiSSID2[32];
@@ -693,6 +752,8 @@ struct SecurityStruct
   uint8_t       ProgmemMd5[16]; // crc of the binary that last saved the struct to file.
   uint8_t       md5[16];
 } SecuritySettings;
+
+
 
 
 /*********************************************************************************************\
@@ -724,6 +785,21 @@ struct SettingsStruct
   bool OldRulesEngine() {  return !getBitFromUL(VariousBits1, 3); }
   void OldRulesEngine(bool value) {  setBitToUL(VariousBits1, 3, !value); }
 
+  bool ForceWiFi_bg_mode() {  return getBitFromUL(VariousBits1, 4); }
+  void ForceWiFi_bg_mode(bool value) {  setBitToUL(VariousBits1, 4, value); }
+
+  bool WiFiRestart_connection_lost() {  return getBitFromUL(VariousBits1, 5); }
+  void WiFiRestart_connection_lost(bool value) {  setBitToUL(VariousBits1, 5, value); }
+
+  bool EcoPowerMode() {  return getBitFromUL(VariousBits1, 6); }
+  void EcoPowerMode(bool value) {  setBitToUL(VariousBits1, 6, value); }
+
+  bool WifiNoneSleep() {  return getBitFromUL(VariousBits1, 7); }
+  void WifiNoneSleep(bool value) {  setBitToUL(VariousBits1, 7, value); }
+
+  // Enable send gratuitous ARP by default, so invert the values (default = 0)
+  bool gratuitousARP() {  return !getBitFromUL(VariousBits1, 8); }
+  void gratuitousARP(bool value) {  setBitToUL(VariousBits1, 8, !value); }
 
   void validate() {
     if (UDPPort > 65535) UDPPort = 0;
@@ -731,6 +807,8 @@ struct SettingsStruct
     if (Latitude  < -90.0  || Latitude > 90.0) Latitude = 0.0;
     if (Longitude < -180.0 || Longitude > 180.0) Longitude = 0.0;
     if (VariousBits1 > (1 << 30)) VariousBits1 = 0;
+    ZERO_TERMINATE(Name);
+    ZERO_TERMINATE(NTPHost);
   }
 
   bool networkSettingsEmpty() {
@@ -748,7 +826,7 @@ struct SettingsStruct
 
   void clearTimeSettings() {
     UseNTP = false;
-    NTPHost[0] = 0;
+    ZERO_FILL(NTPHost);
     TimeZone = 0;
     DST = false;
     DST_Start = 0;
@@ -788,7 +866,7 @@ struct SettingsStruct
 
   void clearUnitNameSettings() {
     Unit = 0;
-    Name[0] = 0;
+    ZERO_FILL(Name);
     UDPPort = 0;
   }
 
@@ -826,6 +904,11 @@ struct SettingsStruct
     MQTTUseUnitNameAsClientId = 0;
     VariousBits1 = 0;
     OldRulesEngine(DEFAULT_RULES_OLDENGINE);
+    ForceWiFi_bg_mode(DEFAULT_WIFI_FORCE_BG_MODE);
+    WiFiRestart_connection_lost(DEFAULT_WIFI_RESTART_WIFI_CONN_LOST);
+    EcoPowerMode(DEFAULT_ECO_MODE);
+    WifiNoneSleep(DEFAULT_WIFI_NONE_SLEEP);
+    gratuitousARP(DEFAULT_GRATUITOUS_ARD);
   }
 
   void clearAll() {
@@ -965,20 +1048,6 @@ SettingsStruct* SettingsStruct_ptr = new SettingsStruct;
 SettingsStruct& Settings = *SettingsStruct_ptr;
 */
 
-/*********************************************************************************************\
- *  Analyze SettingsStruct and report inconsistencies
- *  Not a member function to be able to use the F-macro
-\*********************************************************************************************/
-bool SettingsCheck(String& error) {
-  error = "";
-  if (!Settings.networkSettingsEmpty()) {
-    if (Settings.IP[0] == 0 || Settings.Gateway[0] == 0 || Settings.Subnet[0] == 0 || Settings.DNS[0] == 0) {
-      error += F("Error: Either fill all IP settings fields or leave all empty");
-    }
-  }
-
-  return error.length() == 0;
-}
 
 /*********************************************************************************************\
  * ControllerSettingsStruct definition
@@ -991,13 +1060,14 @@ struct ControllerSettingsStruct
     for (byte i = 0; i < 4; ++i) {
       IP[i] = 0;
     }
-    memset(HostName, 0, sizeof(HostName));
-    memset(Publish, 0, sizeof(Publish));
-    memset(Subscribe, 0, sizeof(Subscribe));
-    memset(MQTTLwtTopic, 0, sizeof(MQTTLwtTopic));
-    memset(LWTMessageConnect, 0, sizeof(LWTMessageConnect));
-    memset(LWTMessageDisconnect, 0, sizeof(LWTMessageDisconnect));
+    ZERO_FILL(HostName);
+    ZERO_FILL(Publish);
+    ZERO_FILL(Subscribe);
+    ZERO_FILL(MQTTLwtTopic);
+    ZERO_FILL(LWTMessageConnect);
+    ZERO_FILL(LWTMessageDisconnect);
   }
+
   boolean       UseDNS;
   byte          IP[4];
   unsigned int  Port;
@@ -1021,10 +1091,16 @@ struct ControllerSettingsStruct
     if (MaxQueueDepth > CONTROLLER_DELAY_QUEUE_DEPTH_MAX) MaxQueueDepth = CONTROLLER_DELAY_QUEUE_DEPTH_DFLT;
     if (MaxRetry > CONTROLLER_DELAY_QUEUE_RETRY_MAX) MaxRetry = CONTROLLER_DELAY_QUEUE_RETRY_MAX;
     if (MaxQueueDepth == 0) MaxQueueDepth = CONTROLLER_DELAY_QUEUE_DEPTH_DFLT;
-    if (MaxRetry == 0) MaxRetry = CONTROLLER_DELAY_QUEUE_DELAY_DFLT;
+    if (MaxRetry == 0) MaxRetry = CONTROLLER_DELAY_QUEUE_RETRY_DFLT;
     if (ClientTimeout < 10 || ClientTimeout > CONTROLLER_CLIENTTIMEOUT_MAX) {
       ClientTimeout = CONTROLLER_CLIENTTIMEOUT_DFLT;
     }
+    ZERO_TERMINATE(HostName);
+    ZERO_TERMINATE(Publish);
+    ZERO_TERMINATE(Subscribe);
+    ZERO_TERMINATE(MQTTLwtTopic);
+    ZERO_TERMINATE(LWTMessageConnect);
+    ZERO_TERMINATE(LWTMessageDisconnect);
   }
 
   IPAddress getIP() const {
@@ -1139,14 +1215,25 @@ typedef std::shared_ptr<ControllerSettingsStruct> ControllerSettingsStruct_ptr_t
 struct NotificationSettingsStruct
 {
   NotificationSettingsStruct() : Port(0), Pin1(0), Pin2(0) {
-    memset(Server,   0, sizeof(Server));
-    memset(Domain,   0, sizeof(Domain));
-    memset(Sender,   0, sizeof(Sender));
-    memset(Receiver, 0, sizeof(Receiver));
-    memset(Subject,  0, sizeof(Subject));
-    memset(Body,     0, sizeof(Body));
-    memset(User,     0, sizeof(User));
-    memset(Pass,     0, sizeof(Pass));
+    ZERO_FILL(Server);
+    ZERO_FILL(Domain);
+    ZERO_FILL(Sender);
+    ZERO_FILL(Receiver);
+    ZERO_FILL(Subject);
+    ZERO_FILL(Body);
+    ZERO_FILL(User);
+    ZERO_FILL(Pass);
+  }
+
+  void validate() {
+    ZERO_TERMINATE(Server);
+    ZERO_TERMINATE(Domain);
+    ZERO_TERMINATE(Sender);
+    ZERO_TERMINATE(Receiver);
+    ZERO_TERMINATE(Subject);
+    ZERO_TERMINATE(Body);
+    ZERO_TERMINATE(User);
+    ZERO_TERMINATE(Pass);
   }
 
   char          Server[65];
@@ -1184,19 +1271,23 @@ struct ExtraTaskSettingsStruct
 
   void clear() {
     TaskIndex = TASKS_MAX;
-    for (byte j = 0; j < (NAME_FORMULA_LENGTH_MAX + 1); ++j) {
-      TaskDeviceName[j] = 0;
-    }
+    ZERO_FILL(TaskDeviceName);
     for (byte i = 0; i < VARS_PER_TASK; ++i) {
-      for (byte j = 0; j < (NAME_FORMULA_LENGTH_MAX + 1); ++j) {
-        TaskDeviceFormula[i][j] = 0;
-        TaskDeviceValueNames[i][j] = 0;
-        TaskDeviceValueDecimals[i] = 2;
-      }
+      TaskDeviceValueDecimals[i] = 2;
+      ZERO_FILL(TaskDeviceFormula[i]);
+      ZERO_FILL(TaskDeviceValueNames[i]);
     }
     for (byte i = 0; i < PLUGIN_EXTRACONFIGVAR_MAX; ++i) {
       TaskDevicePluginConfigLong[i] = 0;
       TaskDevicePluginConfig[i] = 0;
+    }
+  }
+
+  void validate() {
+    ZERO_TERMINATE(TaskDeviceName);
+    for (byte i = 0; i < VARS_PER_TASK; ++i) {
+      ZERO_TERMINATE(TaskDeviceFormula[i]);
+      ZERO_TERMINATE(TaskDeviceValueNames[i]);
     }
   }
 
@@ -1411,12 +1502,12 @@ struct LogStruct {
       }
     }
 
+    String Message[LOG_STRUCT_MESSAGE_LINES];
+    unsigned long timeStamp[LOG_STRUCT_MESSAGE_LINES];
     int write_idx;
     int read_idx;
-    unsigned long timeStamp[LOG_STRUCT_MESSAGE_LINES];
     unsigned long lastReadTimeStamp;
     byte log_level[LOG_STRUCT_MESSAGE_LINES];
-    String Message[LOG_STRUCT_MESSAGE_LINES];
 
 } Logging;
 
@@ -1557,6 +1648,10 @@ struct pinStatesStruct
 // this offsets are in blocks, bytes = blocks * 4
 #define RTC_BASE_STRUCT 64
 #define RTC_BASE_USERVAR 74
+#define RTC_BASE_CACHE 124
+
+#define RTC_CACHE_DATA_SIZE 240
+#define CACHE_FILE_MAX_SIZE 24000
 
 /*********************************************************************************************\
  * RTCStruct
@@ -1588,6 +1683,22 @@ boolean printToWebJSON = false;
 
 float UserVar[VARS_PER_TASK * TASKS_MAX];
 
+/********************************************************************************************\
+  RTC_cache_struct
+\*********************************************************************************************/
+struct RTC_cache_struct
+{
+  uint32_t checksumData = 0;
+  uint16_t readFileNr = 0;       // File number used to read from.
+  uint16_t writeFileNr = 0;      // File number to write to.
+  uint16_t readPos = 0;          // Read position in file based cache
+  uint16_t writePos = 0;         // Write position in the RTC memory
+  uint32_t checksumMetadata = 0;
+};
+
+struct RTC_cache_handler_struct;
+
+
 /*********************************************************************************************\
  * rulesTimerStruct
 \*********************************************************************************************/
@@ -1602,6 +1713,7 @@ struct rulesTimerStatus
 
 msecTimerHandlerStruct msecTimerHandler;
 
+unsigned long timer_gratuitous_arp_interval = 5000;
 unsigned long timermqtt_interval = 250;
 unsigned long lastSend = 0;
 unsigned long lastWeb = 0;
@@ -1940,44 +2052,56 @@ unsigned long timediff_calls = 0;
 unsigned long timediff_cpu_cycles_total = 0;
 unsigned long timingstats_last_reset = 0;
 
-#define LOADFILE_STATS        0
-#define SAVEFILE_STATS        1
-#define LOOP_STATS            2
-#define PLUGIN_CALL_50PS      3
-#define PLUGIN_CALL_10PS      4
-#define PLUGIN_CALL_10PSU     5
-#define PLUGIN_CALL_1PS       6
-#define SENSOR_SEND_TASK      7
-#define SEND_DATA_STATS       8
-#define COMPUTE_FORMULA_STATS 9
-#define PROC_SYS_TIMER       10
-#define SET_NEW_TIMER        11
-#define TIME_DIFF_COMPUTE    12
-#define MQTT_DELAY_QUEUE     13
-#define C001_DELAY_QUEUE     14
-#define C002_DELAY_QUEUE     15
-#define C003_DELAY_QUEUE     16
-#define C004_DELAY_QUEUE     17
-#define C005_DELAY_QUEUE     18
-#define C006_DELAY_QUEUE     19
-#define C007_DELAY_QUEUE     20
-#define C008_DELAY_QUEUE     21
-#define C009_DELAY_QUEUE     22
-#define C010_DELAY_QUEUE     23
-#define C011_DELAY_QUEUE     24
-#define C012_DELAY_QUEUE     25
-#define C013_DELAY_QUEUE     26
-#define TRY_CONNECT_HOST_TCP 27
-#define TRY_CONNECT_HOST_UDP 28
-#define HOST_BY_NAME_STATS   29
-#define CONNECT_CLIENT_STATS 30
-#define LOAD_CUSTOM_TASK_STATS 31
-#define WIFI_ISCONNECTED_STATS 32
-#define LOAD_TASK_SETTINGS     33
-#define RULES_PROCESSING       34
-#define BACKGROUND_TASKS       35
-#define HANDLE_SCHEDULER_IDLE  36
-#define HANDLE_SCHEDULER_TASK  37
+#define LOADFILE_STATS          0
+#define SAVEFILE_STATS          1
+#define LOOP_STATS              2
+#define PLUGIN_CALL_50PS        3
+#define PLUGIN_CALL_10PS        4
+#define PLUGIN_CALL_10PSU       5
+#define PLUGIN_CALL_1PS         6
+#define SENSOR_SEND_TASK        7
+#define SEND_DATA_STATS         8
+#define COMPUTE_FORMULA_STATS   9
+#define PROC_SYS_TIMER          10
+#define SET_NEW_TIMER           11
+#define TIME_DIFF_COMPUTE       12
+#define MQTT_DELAY_QUEUE        13
+#define C001_DELAY_QUEUE        14
+#define C002_DELAY_QUEUE        15
+#define C003_DELAY_QUEUE        16
+#define C004_DELAY_QUEUE        17
+#define C005_DELAY_QUEUE        18
+#define C006_DELAY_QUEUE        19
+#define C007_DELAY_QUEUE        20
+#define C008_DELAY_QUEUE        21
+#define C009_DELAY_QUEUE        22
+#define C010_DELAY_QUEUE        23
+#define C011_DELAY_QUEUE        24
+#define C012_DELAY_QUEUE        25
+#define C013_DELAY_QUEUE        26
+#define C014_DELAY_QUEUE        27
+#define C015_DELAY_QUEUE        28
+#define C016_DELAY_QUEUE        29
+#define C017_DELAY_QUEUE        30
+#define C018_DELAY_QUEUE        31
+#define C019_DELAY_QUEUE        32
+#define C020_DELAY_QUEUE        33
+#define TRY_CONNECT_HOST_TCP    34
+#define TRY_CONNECT_HOST_UDP    35
+#define HOST_BY_NAME_STATS      36
+#define CONNECT_CLIENT_STATS    37
+#define LOAD_CUSTOM_TASK_STATS  38
+#define WIFI_ISCONNECTED_STATS  39
+#define WIFI_NOTCONNECTED_STATS 40
+#define LOAD_TASK_SETTINGS      41
+#define TRY_OPEN_FILE           42
+#define SPIFFS_GC_SUCCESS       43
+#define SPIFFS_GC_FAIL          44
+#define RULES_PROCESSING        45
+#define GRAT_ARP_STATS          46
+#define BACKGROUND_TASKS        47
+#define HANDLE_SCHEDULER_IDLE   48
+#define HANDLE_SCHEDULER_TASK   49
 
 
 
@@ -2011,8 +2135,13 @@ String getMiscStatsName(int stat) {
         case CONNECT_CLIENT_STATS:  return F("connectClient()");
         case LOAD_CUSTOM_TASK_STATS: return F("LoadCustomTaskSettings()");
         case WIFI_ISCONNECTED_STATS: return F("WiFi.isConnected()");
+        case WIFI_NOTCONNECTED_STATS: return F("WiFi.isConnected() (fail)");
         case LOAD_TASK_SETTINGS:     return F("LoadTaskSettings()");
+        case TRY_OPEN_FILE:          return F("TryOpenFile()");
+        case SPIFFS_GC_SUCCESS:      return F("SPIFFS GC success");
+        case SPIFFS_GC_FAIL:         return F("SPIFFS GC fail");
         case RULES_PROCESSING:       return F("rulesProcessing()");
+        case GRAT_ARP_STATS:         return F("sendGratuitousARP()");
         case BACKGROUND_TASKS:       return F("backgroundtasks()");
         case HANDLE_SCHEDULER_IDLE:  return F("handle_schedule() idle");
         case HANDLE_SCHEDULER_TASK:  return F("handle_schedule() task");
@@ -2029,6 +2158,13 @@ String getMiscStatsName(int stat) {
         case C011_DELAY_QUEUE:
         case C012_DELAY_QUEUE:
         case C013_DELAY_QUEUE:
+        case C014_DELAY_QUEUE:
+        case C015_DELAY_QUEUE:
+        case C016_DELAY_QUEUE:
+        case C017_DELAY_QUEUE:
+        case C018_DELAY_QUEUE:
+        case C019_DELAY_QUEUE:
+        case C020_DELAY_QUEUE:
         {
           String result;
           result.reserve(16);

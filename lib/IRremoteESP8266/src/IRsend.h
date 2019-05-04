@@ -28,6 +28,8 @@ const uint8_t kDutyMax = 100;     // Percentage
 // delayMicroseconds() is only accurate to 16383us.
 // Ref: https://www.arduino.cc/en/Reference/delayMicroseconds
 const uint16_t kMaxAccurateUsecDelay = 16383;
+//  Usecs to wait between messages we don't know the proper gap time.
+const uint32_t kDefaultMessageGap = 100000;
 
 // Classes
 class IRsend {
@@ -66,7 +68,7 @@ class IRsend {
                    const uint8_t *dataptr, const uint16_t nbytes,
                    const uint16_t frequency, const bool MSBfirst,
                    const uint16_t repeat, const uint8_t dutycycle);
-  void send(uint16_t type, uint64_t data, uint16_t nbits);
+  bool send(decode_type_t type, uint64_t data, uint16_t nbits);
 #if (SEND_NEC || SEND_SHERWOOD || SEND_AIWA_RC_T501 || SEND_SANYO)
   void sendNEC(uint64_t data, uint16_t nbits = kNECBits,
                uint16_t repeat = kNoRepeat);
@@ -92,10 +94,14 @@ class IRsend {
                    uint16_t repeat = kNoRepeat);
   uint32_t encodeSAMSUNG(uint8_t customer, uint8_t command);
 #endif
+#if SEND_SAMSUNG36
+  void sendSamsung36(const uint64_t data, const uint16_t nbits = kSamsung36Bits,
+                     const uint16_t repeat = kNoRepeat);
+#endif
 #if SEND_SAMSUNG_AC
   void sendSamsungAC(unsigned char data[],
                      uint16_t nbytes = kSamsungAcStateLength,
-                     uint16_t repeat = kNoRepeat);
+                     uint16_t repeat = kSamsungAcDefaultRepeat);
 #endif
 #if SEND_LG
   void sendLG(uint64_t data, uint16_t nbits = kLgBits,
@@ -166,7 +172,7 @@ class IRsend {
 #endif
 #if SEND_COOLIX
   void sendCOOLIX(uint64_t data, uint16_t nbits = kCoolixBits,
-                  uint16_t repeat = kNoRepeat);
+                  uint16_t repeat = kCoolixDefaultRepeat);
 #endif
 #if SEND_WHYNTER
   void sendWhynter(uint64_t data, uint16_t nbits = kWhynterBits,
@@ -195,12 +201,15 @@ class IRsend {
 #if SEND_KELVINATOR
   void sendKelvinator(unsigned char data[],
                       uint16_t nbytes = kKelvinatorStateLength,
-                      uint16_t repeat = kNoRepeat);
+                      uint16_t repeat = kKelvinatorDefaultRepeat);
 #endif
 #if SEND_DAIKIN
   void sendDaikin(unsigned char data[], uint16_t nbytes = kDaikinStateLength,
-                  uint16_t repeat = kNoRepeat);
-  void sendDaikinGapHeader();
+                  uint16_t repeat = kDaikinDefaultRepeat);
+#endif
+#if SEND_DAIKIN2
+  void sendDaikin2(unsigned char data[], uint16_t nbytes = kDaikin2StateLength,
+                   uint16_t repeat = kDaikin2DefaultRepeat);
 #endif
 #if SEND_AIWA_RC_T501
   void sendAiwaRCT501(uint64_t data, uint16_t nbits = kAiwaRcT501Bits,
@@ -208,20 +217,20 @@ class IRsend {
 #endif
 #if SEND_GREE
   void sendGree(uint64_t data, uint16_t nbits = kGreeBits,
-                uint16_t repeat = kNoRepeat);
+                uint16_t repeat = kGreeDefaultRepeat);
   void sendGree(uint8_t data[], uint16_t nbytes = kGreeStateLength,
-                uint16_t repeat = kNoRepeat);
+                uint16_t repeat = kGreeDefaultRepeat);
 #endif
 #if SEND_PRONTO
   void sendPronto(uint16_t data[], uint16_t len, uint16_t repeat = kNoRepeat);
 #endif
 #if SEND_ARGO
   void sendArgo(unsigned char data[], uint16_t nbytes = kArgoStateLength,
-                uint16_t repeat = kNoRepeat);
+                uint16_t repeat = kArgoDefaultRepeat);
 #endif
 #if SEND_TROTEC
   void sendTrotec(unsigned char data[], uint16_t nbytes = kTrotecStateLength,
-                  uint16_t repeat = kNoRepeat);
+                  uint16_t repeat = kTrotecDefaultRepeat);
 #endif
 #if SEND_NIKAI
   void sendNikai(uint64_t data, uint16_t nbits = kNikaiBits,
@@ -251,17 +260,17 @@ class IRsend {
 #endif
 #if (SEND_HAIER_AC || SEND_HAIER_AC_YRW02)
   void sendHaierAC(unsigned char data[], uint16_t nbytes = kHaierACStateLength,
-                   uint16_t repeat = kNoRepeat);
+                   uint16_t repeat = kHaierAcDefaultRepeat);
 #endif
 #if SEND_HAIER_AC_YRW02
   void sendHaierACYRW02(unsigned char data[],
                         uint16_t nbytes = kHaierACYRW02StateLength,
-                        uint16_t repeat = kNoRepeat);
+                        uint16_t repeat = kHaierAcYrw02DefaultRepeat);
 #endif
 #if SEND_HITACHI_AC
   void sendHitachiAC(unsigned char data[],
                      uint16_t nbytes = kHitachiAcStateLength,
-                     uint16_t repeat = kNoRepeat);
+                     uint16_t repeat = kHitachiAcDefaultRepeat);
 #endif
 #if SEND_HITACHI_AC1
   void sendHitachiAC1(unsigned char data[],
@@ -280,7 +289,7 @@ class IRsend {
 #if SEND_WHIRLPOOL_AC
   void sendWhirlpoolAC(unsigned char data[],
                        uint16_t nbytes = kWhirlpoolAcStateLength,
-                       uint16_t repeat = kNoRepeat);
+                       uint16_t repeat = kWhirlpoolAcDefaultRepeat);
 #endif
 #if SEND_LUTRON
   void sendLutron(uint64_t data, uint16_t nbits = kLutronBits,
@@ -294,7 +303,7 @@ class IRsend {
 #if SEND_PANASONIC_AC
   void sendPanasonicAC(unsigned char data[],
                        uint16_t nbytes = kPanasonicAcStateLength,
-                       uint16_t repeat = kNoRepeat);
+                       uint16_t repeat = kPanasonicAcDefaultRepeat);
 #endif
 #if SEND_PIONEER
   void sendPioneer(const uint64_t data, const uint16_t nbits = kPioneerBits,
@@ -305,6 +314,24 @@ class IRsend {
   void sendMWM(unsigned char data[], uint16_t nbytes,
                uint16_t repeat = kNoRepeat);
 #endif
+#if SEND_VESTEL_AC
+  void sendVestelAc(const uint64_t data, const uint16_t nbits = kVestelAcBits,
+                    const uint16_t repeat = kNoRepeat);
+#endif
+#if SEND_TCL112AC
+  void sendTcl112Ac(const unsigned char data[],
+                    const uint16_t nbytes = kTcl112AcStateLength,
+                    const uint16_t repeat = kTcl112AcDefaultRepeat);
+#endif
+#if SEND_TECO
+  void sendTeco(uint64_t data, uint16_t nbits = kTecoBits,
+                uint16_t repeat = kNoRepeat);
+#endif
+#if SEND_LEGOPF
+  void sendLegoPf(const uint64_t data, const uint16_t nbits = kLegoPfBits,
+                  const uint16_t repeat = kLegoPfMinRepeat);
+#endif
+
 
  protected:
 #ifdef UNIT_TEST

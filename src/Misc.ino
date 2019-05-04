@@ -263,7 +263,7 @@ uint32_t getFreeStackWatermark() {
 bool canYield() { return true; }
 
 #else
-#if defined(ARDUINO_ESP8266_RELEASE_2_3_0) || defined(ARDUINO_ESP8266_RELEASE_2_4_0) || defined(ARDUINO_ESP8266_RELEASE_2_4_1)
+#ifdef CORE_PRE_2_4_2
 // All version before core 2.4.2
 extern "C" {
 #include <cont.h>
@@ -393,7 +393,7 @@ void deepSleepStart(int dsdelay)
   addLog(LOG_LEVEL_INFO, F("SLEEP: Powering down to deepsleep..."));
   delay(100); // give the node time to send above log message before going to sleep
   #if defined(ESP8266)
-    #if defined(CORE_2_5_0)
+    #if defined(CORE_POST_2_5_0)
       uint64_t deepSleep_usec = dsdelay * 1000000ULL;
       if ((deepSleep_usec > ESP.deepSleepMax()) || dsdelay < 0) {
         deepSleep_usec = ESP.deepSleepMax();
@@ -1095,8 +1095,8 @@ void ResetFactory()
   if (!ResetFactoryDefaultPreference.keepNetwork()) {
     Settings.clearNetworkSettings();
     // TD-er Reset access control
-    str2ip((char*)DEFAULT_IPRANGE_LOW, SecuritySettings.AllowedIPrangeLow);
-    str2ip((char*)DEFAULT_IPRANGE_HIGH, SecuritySettings.AllowedIPrangeHigh);
+    str2ip(F(DEFAULT_IPRANGE_LOW), SecuritySettings.AllowedIPrangeLow);
+    str2ip(F(DEFAULT_IPRANGE_HIGH), SecuritySettings.AllowedIPrangeHigh);
     SecuritySettings.IPblockLevel = DEFAULT_IP_BLOCK_LEVEL;
 
     #if DEFAULT_USE_STATIC_IP
@@ -1438,12 +1438,16 @@ void setLogLevelFor(byte destination, byte logLevel) {
 void updateLogLevelCache() {
   byte max_lvl = 0;
   if (log_to_serial_disabled) {
-    Serial.setDebugOutput(false);
+    if (Settings.UseSerial) {
+      Serial.setDebugOutput(false);
+    }
   } else {
     max_lvl = _max(max_lvl, Settings.SerialLogLevel);
-    if (Settings.SerialLogLevel >= LOG_LEVEL_DEBUG_MORE) {
+#ifndef BUILD_NO_DEBUG
+    if (Settings.UseSerial && Settings.SerialLogLevel >= LOG_LEVEL_DEBUG_MORE) {
       Serial.setDebugOutput(true);
     }
+#endif
   }
   max_lvl = _max(max_lvl, Settings.SyslogLevel);
   if (Logging.logActiveRead()) {
@@ -1558,114 +1562,12 @@ void delayedReboot(int rebootDelay)
 void reboot() {
   // FIXME TD-er: Should network connections be actively closed or does this introduce new issues?
   flushAndDisconnectAllClients();
+  SPIFFS.end();
   #if defined(ESP32)
     ESP.restart();
   #else
     ESP.reset();
   #endif
-}
-
-
-/********************************************************************************************\
-  Save RTC struct to RTC memory
-  \*********************************************************************************************/
-boolean saveToRTC()
-{
-  #if defined(ESP32)
-    return false;
-  #else
-    if (!system_rtc_mem_write(RTC_BASE_STRUCT, (byte*)&RTC, sizeof(RTC)) || !readFromRTC())
-    {
-      addLog(LOG_LEVEL_ERROR, F("RTC  : Error while writing to RTC"));
-      return(false);
-    }
-    else
-    {
-      return(true);
-    }
-  #endif
-}
-
-
-/********************************************************************************************\
-  Initialize RTC memory
-  \*********************************************************************************************/
-void initRTC()
-{
-  memset(&RTC, 0, sizeof(RTC));
-  RTC.ID1 = 0xAA;
-  RTC.ID2 = 0x55;
-  saveToRTC();
-
-  memset(&UserVar, 0, sizeof(UserVar));
-  saveUserVarToRTC();
-}
-
-/********************************************************************************************\
-  Read RTC struct from RTC memory
-  \*********************************************************************************************/
-boolean readFromRTC()
-{
-  #if defined(ESP32)
-    return false;
-  #else
-    if (!system_rtc_mem_read(RTC_BASE_STRUCT, (byte*)&RTC, sizeof(RTC)))
-      return(false);
-    return (RTC.ID1 == 0xAA && RTC.ID2 == 0x55);
-  #endif
-}
-
-
-/********************************************************************************************\
-  Save values to RTC memory
-\*********************************************************************************************/
-boolean saveUserVarToRTC()
-{
-  #if defined(ESP32)
-    return false;
-  #else
-    //addLog(LOG_LEVEL_DEBUG, F("RTCMEM: saveUserVarToRTC"));
-    byte* buffer = (byte*)&UserVar;
-    size_t size = sizeof(UserVar);
-    uint32_t sum = getChecksum(buffer, size);
-    boolean ret = system_rtc_mem_write(RTC_BASE_USERVAR, buffer, size);
-    ret &= system_rtc_mem_write(RTC_BASE_USERVAR+(size>>2), (byte*)&sum, 4);
-    return ret;
-  #endif
-}
-
-
-/********************************************************************************************\
-  Read RTC struct from RTC memory
-\*********************************************************************************************/
-boolean readUserVarFromRTC()
-{
-  #if defined(ESP32)
-    return false;
-  #else
-    //addLog(LOG_LEVEL_DEBUG, F("RTCMEM: readUserVarFromRTC"));
-    byte* buffer = (byte*)&UserVar;
-    size_t size = sizeof(UserVar);
-    boolean ret = system_rtc_mem_read(RTC_BASE_USERVAR, buffer, size);
-    uint32_t sumRAM = getChecksum(buffer, size);
-    uint32_t sumRTC = 0;
-    ret &= system_rtc_mem_read(RTC_BASE_USERVAR+(size>>2), (byte*)&sumRTC, 4);
-    if (!ret || sumRTC != sumRAM)
-    {
-      addLog(LOG_LEVEL_ERROR, F("RTC  : Checksum error on reading RTC user var"));
-      memset(buffer, 0, size);
-    }
-    return ret;
-  #endif
-}
-
-
-uint32_t getChecksum(byte* buffer, size_t size)
-{
-  uint32_t sum = 0x82662342;   //some magic to avoid valid checksum on new, uninitialized ESP
-  for (size_t i=0; i<size; i++)
-    sum += buffer[i];
-  return sum;
 }
 
 
@@ -2003,6 +1905,7 @@ void transformValue(
           newString += ' ';
       }
       {
+#ifndef BUILD_NO_DEBUG
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           String logFormatted = F("DEBUG: Formatted String='");
           logFormatted += newString;
@@ -2010,6 +1913,7 @@ void transformValue(
           logFormatted += '\'';
           addLog(LOG_LEVEL_DEBUG, logFormatted);
         }
+#endif
       }
     }
   }
@@ -2017,12 +1921,14 @@ void transformValue(
 
   newString += String(value);
   {
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
       String logParsed = F("DEBUG DEV: Parsed String='");
       logParsed += newString;
       logParsed += '\'';
       addLog(LOG_LEVEL_DEBUG_DEV, logParsed);
     }
+#endif
   }
   checkRAM(F("transformValue2"));
 }
@@ -2372,7 +2278,9 @@ int CalculateParam(const char *TmpStr) {
           log += round(param);
           addLog(LOG_LEVEL_ERROR, log);
         }
-      } else {
+      }
+#ifndef BUILD_NO_DEBUG
+        else {
       if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
         String log = F("CALCULATE PARAM: ");
         log += TmpStr;
@@ -2381,6 +2289,7 @@ int CalculateParam(const char *TmpStr) {
         addLog(LOG_LEVEL_DEBUG, log);
       }
     }
+#endif
     returnValue=round(param); //return integer only as it's valid only for device and task id
   }
   return returnValue;
@@ -2413,7 +2322,9 @@ void SendValueLogger(byte TaskIndex)
       logger += "\r\n";
     }
 
+#ifndef BUILD_NO_DEBUG
     addLog(LOG_LEVEL_DEBUG, logger);
+#endif
   }
 
 #ifdef FEATURE_SD
@@ -2487,6 +2398,7 @@ class RamTracker{
        if (writePtr >= TRACEENTRIES) writePtr=0;          // inc write pointer and wrap around too.
     };
    void getTraceBuffer(){                                // return giant strings, one line per trace. Add stremToWeb method to avoid large strings.
+#ifndef BUILD_NO_DEBUG
       if (loglevelActiveFor(LOG_LEVEL_DEBUG_DEV)) {
         String retval="Memtrace\n";
         for (int i = 0; i< TRACES; i++){
@@ -2499,6 +2411,7 @@ class RamTracker{
           retval="";
         }
       }
+#endif
     }
 }myRamTracker;                                              // instantiate class. (is global now)
 
@@ -2771,6 +2684,7 @@ void ArduinoOTAInit()
       reboot();
   });
   ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    if (Settings.UseSerial)
       Serial.printf("OTA  : Progress %u%%\r", (progress / (total / 100)));
   });
 
@@ -2819,6 +2733,25 @@ int calc_CRC16(const char *ptr, int count)
     }
     return crc;
 }
+
+uint32_t calc_CRC32(const uint8_t *data, size_t length) {
+  uint32_t crc = 0xffffffff;
+  while (length--) {
+    uint8_t c = *data++;
+    for (uint32_t i = 0x80; i > 0; i >>= 1) {
+      bool bit = crc & 0x80000000;
+      if (c & i) {
+        bit = !bit;
+      }
+      crc <<= 1;
+      if (bit) {
+        crc ^= 0x04c11db7;
+      }
+    }
+  }
+  return crc;
+}
+
 
 // Compute the dew point temperature, given temperature and humidity (temp in Celcius)
 // Formula: http://www.ajdesigner.com/phphumidity/dewpoint_equation_dewpoint_temperature.php

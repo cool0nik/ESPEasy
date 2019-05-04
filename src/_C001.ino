@@ -105,6 +105,13 @@ bool CPlugin_001(byte function, struct EventStruct *event, String& string)
         }
         break;
       }
+
+    case CPLUGIN_FLUSH:
+      {
+        process_c001_delay_queue();
+        delay(0);
+        break;
+      }
   }
   return success;
 }
@@ -117,7 +124,9 @@ bool do_process_c001_delay_queue(int controller_number, const C001_queue_element
   // This will send the request to the server
   String request = create_http_request_auth(controller_number, element.controller_idx, ControllerSettings, F("GET"), element.txt);
 
+#ifndef BUILD_NO_DEBUG
   addLog(LOG_LEVEL_DEBUG, element.txt);
+#endif
   return send_via_http(controller_number, client, request, ControllerSettings.MustCheckReply);
 }
 

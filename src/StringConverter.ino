@@ -154,6 +154,20 @@ String toString(bool value) {
 }
 
 /*********************************************************************************************\
+   Typical string replace functions.
+  \*********************************************************************************************/
+void removeExtraNewLine(String& line) {
+  while (line.endsWith("\r\n\r\n")) {
+    line.remove(line.length()-2);
+  }
+}
+
+void addNewLine(String& line) {
+  line += "\r\n";
+}
+
+
+/*********************************************************************************************\
    Format a value to the set number of decimals
   \*********************************************************************************************/
 String doFormatUserVar(byte TaskIndex, byte rel_index, bool mustCheck, bool& isvalid) {
@@ -177,6 +191,7 @@ String doFormatUserVar(byte TaskIndex, byte rel_index, bool mustCheck, bool& isv
   float f(UserVar[BaseVarIndex + rel_index]);
   if (mustCheck && !isValidFloat(f)) {
     isvalid = false;
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
       String log = F("Invalid float value for TaskIndex: ");
       log += TaskIndex;
@@ -184,6 +199,7 @@ String doFormatUserVar(byte TaskIndex, byte rel_index, bool mustCheck, bool& isv
       log += rel_index;
       addLog(LOG_LEVEL_DEBUG, log);
     }
+#endif
     f = 0;
   }
   return toString(f, ExtraTaskSettings.TaskDeviceValueDecimals[rel_index]);
@@ -302,6 +318,15 @@ bool safe_strncpy(char* dest, const char* source, size_t max_size) {
   }
   strncpy(dest, source, str_length);
   dest[max_size - 1] = 0;
+  return result;
+}
+
+// Convert a string to lower case and replace spaces with underscores.
+String to_internal_string(const String& input) {
+  String result = input;
+  result.trim();
+  result.toLowerCase();
+  result.replace(' ', '_');
   return result;
 }
 
@@ -612,6 +637,7 @@ String getReplacementString(const String& format, String& s) {
   int startpos = s.indexOf(format);
   int endpos = s.indexOf('%', startpos + 1);
   String R = s.substring(startpos, endpos + 1);
+#ifndef BUILD_NO_DEBUG
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
     String log = F("ReplacementString SunTime: ");
     log += R;
@@ -619,6 +645,7 @@ String getReplacementString(const String& format, String& s) {
     log += getSecOffset(R);
     addLog(LOG_LEVEL_DEBUG, log);
   }
+#endif
   return R;
 }
 

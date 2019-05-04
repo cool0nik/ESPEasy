@@ -42,6 +42,7 @@ const uint8_t kCoolixFanMin = 0b100;
 const uint8_t kCoolixFanMed = 0b010;
 const uint8_t kCoolixFanMax = 0b001;
 const uint8_t kCoolixFanAuto = 0b101;
+const uint8_t kCoolixFanAuto0 = 0b000;
 const uint8_t kCoolixFanZoneFollow = 0b110;
 const uint8_t kCoolixFanFixed = 0b111;
 const uint32_t kCoolixFanMask = 0b000000001110000000000000;  // 0x00E000
@@ -90,7 +91,7 @@ class IRCoolixAC {
 
   void stateReset();
 #if SEND_COOLIX
-  void send();
+  void send(const uint16_t repeat = kCoolixDefaultRepeat);
 #endif  // SEND_COOLIX
   void begin();
   void on();
@@ -127,13 +128,17 @@ class IRCoolixAC {
 #endif
 
  private:
-  // The state of the IR remote in IR code form.
-  uint32_t remote_state;
+  uint32_t remote_state;  // The state of the IR remote in IR code form.
+  uint32_t saved_state;   // Copy of the state if we required a special mode.
   IRsend _irsend;
   void setTempRaw(const uint8_t code);
   uint8_t getTempRaw();
   void setSensorTempRaw(const uint8_t code);
   void setZoneFollow(const bool state);
+  bool isSpecialState(void);
+  void updateSavedState(void);
+  void recoverSavedState(void);
+  uint32_t getNormalState(void);
 };
 
 #endif  // IR_COOLIX_H_

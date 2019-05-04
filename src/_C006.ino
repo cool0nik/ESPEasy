@@ -86,7 +86,7 @@ bool CPlugin_006(byte function, struct EventStruct *event, String& string)
 
     case CPLUGIN_PROTOCOL_SEND:
       {
-        if (!WiFiConnected(100)) {
+        if (!WiFiConnected(10)) {
           success = false;
           break;
         }
@@ -113,6 +113,14 @@ bool CPlugin_006(byte function, struct EventStruct *event, String& string)
         }
         break;
       }
+
+    case CPLUGIN_FLUSH:
+      {
+        processMQTTdelayQueue();
+        delay(0);
+        break;
+      }
+
   }
   return success;
 }

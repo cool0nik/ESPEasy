@@ -32,6 +32,7 @@ Controller Plugins
    ":ref:`C011_page`","|C011_status|","C011"
    ":ref:`C012_page`","|C012_status|","C012"
    ":ref:`C013_page`","|C013_status|","C013"
+   ":ref:`C016_page`","|C016_status|","C016"
 
 
 Controller Parameters
@@ -71,6 +72,7 @@ ThingSpeak only allows a message every 15 seconds for the free accounts.
 - **Max Queue Depth** - 1 (only report the last value)
 - **Max Retries** - 2
 - **Full Queue Action** - Delete Oldest
+- **Check Reply** - Check Acknowledgment (VERY IMPORTANT)
 - **Client Timeout** - 500 msec (server is online, so timeout must be a bit longer)
 
 

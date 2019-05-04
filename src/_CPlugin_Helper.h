@@ -187,6 +187,42 @@ public:
 #define C012_queue_element queue_element_single_value_base
 
 
+/*********************************************************************************************\
+ * C016_queue_element for queueing requests for C016: Cached HTTP.
+\*********************************************************************************************/
+class C016_queue_element {
+public:
+  C016_queue_element() : controller_idx(0), TaskIndex(0), sensorType(0) {}
+  C016_queue_element(const struct EventStruct* event, byte value_count, unsigned long unixTime) :
+    timestamp(unixTime),
+    controller_idx(event->ControllerIndex),
+    TaskIndex(event->TaskIndex),
+    sensorType(event->sensorType),
+    valueCount(value_count)
+  {
+    const byte BaseVarIndex = TaskIndex * VARS_PER_TASK;
+    for (byte i = 0; i < VARS_PER_TASK; ++i) {
+      if (i < value_count) {
+        values[i] = UserVar[BaseVarIndex + i];
+      } else {
+        values[i] = 0.0;
+      }
+    }
+  }
+
+  size_t getSize() const {
+    return sizeof(this);
+  }
+
+  float values[VARS_PER_TASK];
+  unsigned long timestamp;  // Unix timestamp
+  byte controller_idx;
+  byte TaskIndex;
+  byte sensorType;
+  byte valueCount;
+};
+
+
 
 /*********************************************************************************************\
  * ControllerDelayHandlerStruct
@@ -222,6 +258,7 @@ struct ControllerDelayHandlerStruct {
     // Number of elements is not exceeding the limit, check memory
     int freeHeap = ESP.getFreeHeap();
     if (freeHeap > 5000) return false; // Memory is not an issue.
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
       String log = "Controller-";
       log += element.controller_idx +1;
@@ -234,6 +271,7 @@ struct ControllerDelayHandlerStruct {
       log += " free";
       addLog(LOG_LEVEL_DEBUG, log);
     }
+#endif
     return true;
   }
 
@@ -253,11 +291,13 @@ struct ControllerDelayHandlerStruct {
       sendQueue.emplace_back(element);
       return true;
     }
+#ifndef BUILD_NO_DEBUG
     if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
       String log = get_formatted_Controller_number(element.controller_idx);
       log += " : queue full";
       addLog(LOG_LEVEL_DEBUG, log);
     }
+#endif
     return false;
   }
 
@@ -338,7 +378,7 @@ ControllerDelayHandlerStruct<MQTT_queue_element> MQTTDelayHandler;
                   MakeControllerSettings(ControllerSettings); \
                   LoadControllerSettings(element->controller_idx, ControllerSettings); \
                   C##NNN##_DelayHandler.configureControllerSettings(ControllerSettings); \
-                  if (!WiFiConnected(100)) { \
+                  if (!WiFiConnected(10)) { \
                     scheduleNextDelayQueue(TIMER_C##NNN##_DELAY_QUEUE, C##NNN##_DelayHandler.getNextScheduleTime()); \
                     return; \
                   } \
@@ -382,6 +422,43 @@ ControllerDelayHandlerStruct<MQTT_queue_element> MQTTDelayHandler;
   DEFINE_Cxxx_DELAY_QUEUE_MACRO(013, 13)
 #endif
 */
+/*
+#ifdef USES_C014
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(014, 14)
+#endif
+*/
+/*
+#ifdef USES_C015
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(015, 15)
+#endif
+*/
+
+#ifdef USES_C016
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(016, 16)
+#endif
+
+/*
+#ifdef USES_C017
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(017, 17)
+#endif
+*/
+/*
+#ifdef USES_C018
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(018, 18)
+#endif
+*/
+/*
+#ifdef USES_C019
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(019, 19)
+#endif
+*/
+/*
+#ifdef USES_C020
+  DEFINE_Cxxx_DELAY_QUEUE_MACRO(020, 20)
+#endif
+*/
+
+
 // When extending this, also extend in Scheduler.ino:
 // void process_interval_timer(unsigned long id, unsigned long lasttimer)
 
@@ -516,7 +593,9 @@ String do_create_http_request(
   request += get_user_agent_request_header_field();
   request += F("Connection: close\r\n");
   request += "\r\n";
+#ifndef BUILD_NO_DEBUG
   addLog(LOG_LEVEL_DEBUG, request);
+#endif
   return request;
 }
 
@@ -568,6 +647,7 @@ String create_http_request_auth(int controller_number, int controller_index, Con
   return create_http_request_auth(controller_number, controller_index, ControllerSettings, method, uri, -1);
 }
 
+#ifndef BUILD_NO_DEBUG
 void log_connecting_to(const String& prefix, int controller_number, ControllerSettingsStruct& ControllerSettings) {
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
     String log = prefix;
@@ -577,6 +657,7 @@ void log_connecting_to(const String& prefix, int controller_number, ControllerSe
     addLog(LOG_LEVEL_DEBUG, log);
   }
 }
+#endif
 
 void log_connecting_fail(const String& prefix, int controller_number, ControllerSettingsStruct& ControllerSettings) {
   if (loglevelActiveFor(LOG_LEVEL_ERROR)) {
@@ -607,7 +688,9 @@ bool count_connection_results(bool success, const String& prefix, int controller
 bool try_connect_host(int controller_number, WiFiUDP& client, ControllerSettingsStruct& ControllerSettings) {
   START_TIMER;
   client.setTimeout(ControllerSettings.ClientTimeout);
+#ifndef BUILD_NO_DEBUG
   log_connecting_to(F("UDP  : "), controller_number, ControllerSettings);
+#endif
   bool success = ControllerSettings.beginPacket(client) != 0;
   const bool result = count_connection_results(
       success,
@@ -620,7 +703,9 @@ bool try_connect_host(int controller_number, WiFiClient& client, ControllerSetti
   START_TIMER;
   // Use WiFiClient class to create TCP connections
   client.setTimeout(ControllerSettings.ClientTimeout);
+#ifndef BUILD_NO_DEBUG
   log_connecting_to(F("HTTP : "), controller_number, ControllerSettings);
+#endif
   bool success = ControllerSettings.connectToHost(client);
   const bool result = count_connection_results(
       success,
@@ -657,7 +742,9 @@ bool send_via_http(const String& logIdentifier, WiFiClient& client, const String
       addLog(LOG_LEVEL_ERROR, log);
     }
     success = false;
-  } else {
+  }
+#ifndef BUILD_NO_DEBUG
+    else {
     if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
       String log = F("HTTP : ");
       log += logIdentifier;
@@ -669,6 +756,7 @@ bool send_via_http(const String& logIdentifier, WiFiClient& client, const String
       addLog(LOG_LEVEL_DEBUG, log);
     }
   }
+#endif
 
   if (must_check_reply) {
     unsigned long timer = millis() + 200;
@@ -683,6 +771,7 @@ bool send_via_http(const String& logIdentifier, WiFiClient& client, const String
       String line;
       safeReadStringUntil(client, line, '\n');
 
+#ifndef BUILD_NO_DEBUG
       if (loglevelActiveFor(LOG_LEVEL_DEBUG_MORE)) {
         if (line.length() > 80) {
           addLog(LOG_LEVEL_DEBUG_MORE, line.substring(0, 80));
@@ -690,9 +779,12 @@ bool send_via_http(const String& logIdentifier, WiFiClient& client, const String
           addLog(LOG_LEVEL_DEBUG_MORE, line);
         }
       }
+#endif
       if (line.startsWith(F("HTTP/1.1 2")))
       {
         success = true;
+        // Leave this debug info in the build, regardless of the
+        // BUILD_NO_DEBUG flags.
         if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
           String log = F("HTTP : ");
           log += logIdentifier;
@@ -708,17 +800,21 @@ bool send_via_http(const String& logIdentifier, WiFiClient& client, const String
           log += line;
           addLog(LOG_LEVEL_ERROR, log);
         }
+#ifndef BUILD_NO_DEBUG
         addLog(LOG_LEVEL_DEBUG_MORE, postStr);
+#endif
       }
       delay(0);
     }
   }
+#ifndef BUILD_NO_DEBUG
   if (loglevelActiveFor(LOG_LEVEL_DEBUG)) {
     String log = F("HTTP : ");
     log += logIdentifier;
     log += F(" closing connection");
     addLog(LOG_LEVEL_DEBUG, log);
   }
+#endif
 
   client.flush();
   client.stop();

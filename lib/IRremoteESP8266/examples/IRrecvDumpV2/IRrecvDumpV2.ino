@@ -31,12 +31,18 @@
 #include <ir_Fujitsu.h>
 #include <ir_Gree.h>
 #include <ir_Haier.h>
+#include <ir_Hitachi.h>
 #include <ir_Kelvinator.h>
 #include <ir_Midea.h>
 #include <ir_Mitsubishi.h>
 #include <ir_Panasonic.h>
 #include <ir_Samsung.h>
+#include <ir_Tcl.h>
+#include <ir_Teco.h>
 #include <ir_Toshiba.h>
+#include <ir_Vestel.h>
+#include <ir_Whirlpool.h>
+
 
 // ==================== start of TUNEABLE PARAMETERS ====================
 // An IR detector/demodulator is connected to GPIO pin 14
@@ -120,6 +126,13 @@ void dumpACInfo(decode_results *results) {
     description = ac.toString();
   }
 #endif  // DECODE_DAIKIN
+#if DECODE_DAIKIN2
+  if (results->decode_type == DAIKIN2) {
+    IRDaikin2 ac(0);
+    ac.setRaw(results->state);
+    description = ac.toString();
+  }
+#endif  // DECODE_DAIKIN2
 #if DECODE_FUJITSU_AC
   if (results->decode_type == FUJITSU_AC) {
     IRFujitsuAC ac(0);
@@ -179,7 +192,7 @@ void dumpACInfo(decode_results *results) {
 #if DECODE_SAMSUNG_AC
   if (results->decode_type == SAMSUNG_AC) {
     IRSamsungAc ac(0);
-    ac.setRaw(results->state);
+    ac.setRaw(results->state, results->bits / 8);
     description = ac.toString();
   }
 #endif  // DECODE_SAMSUNG_AC
@@ -198,6 +211,41 @@ void dumpACInfo(decode_results *results) {
     description = ac.toString();
   }
 #endif  // DECODE_PANASONIC_AC
+#if DECODE_HITACHI_AC
+  if (results->decode_type == HITACHI_AC) {
+    IRHitachiAc ac(0);
+    ac.setRaw(results->state);
+    description = ac.toString();
+  }
+#endif  // DECODE_HITACHI_AC
+#if DECODE_WHIRLPOOL_AC
+  if (results->decode_type == WHIRLPOOL_AC) {
+    IRWhirlpoolAc ac(0);
+    ac.setRaw(results->state);
+    description = ac.toString();
+  }
+#endif  // DECODE_WHIRLPOOL_AC
+#if DECODE_VESTEL_AC
+  if (results->decode_type == VESTEL_AC) {
+    IRVestelAc ac(0);
+    ac.setRaw(results->value);  // Like Coolix, use value instead of state.
+    description = ac.toString();
+  }
+#endif  // DECODE_VESTEL_AC
+#if DECODE_TECO
+  if (results->decode_type == TECO) {
+    IRTecoAc ac(0);
+    ac.setRaw(results->value);  // Like Coolix, use value instead of state.
+    description = ac.toString();
+  }
+#endif  // DECODE_TECO
+#if DECODE_TCL112AC
+  if (results->decode_type == TCL112AC) {
+    IRTcl112Ac ac(0);
+    ac.setRaw(results->state);
+    description = ac.toString();
+  }
+#endif  // DECODE_TCL112AC
   // If we got a human-readable description of the message, display it.
   if (description != "") Serial.println("Mesg Desc.: " + description);
 }
