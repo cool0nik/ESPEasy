@@ -72,12 +72,8 @@ struct P075_data_struct : public PluginTaskData_base {
     }
   }
 
-  void loadDisplayLines(byte taskIndex) {
-    char deviceTemplate[P75_Nlines][P75_Nchars];
-    LoadCustomTaskSettings(taskIndex, (byte*)&deviceTemplate, sizeof(deviceTemplate));
-    for (byte varNr = 0; varNr < P75_Nlines; varNr++) {
-      displayLines[varNr] = deviceTemplate[varNr];
-    }
+  void loadDisplayLines(taskIndex_t taskIndex) {
+    LoadCustomTaskSettings(taskIndex, displayLines, P75_Nlines, P75_Nchars);
   }
 
   String getLogString() const {
@@ -144,6 +140,12 @@ boolean Plugin_075(byte function, struct EventStruct *event, String& string)
       break;
     }
 
+    case PLUGIN_WEBFORM_SHOW_CONFIG:
+      {
+        string += serialHelper_getSerialTypeLabel(event);
+        success = true;
+        break;
+      }
 
     case PLUGIN_WEBFORM_LOAD: {
       serialHelper_webformLoad(event);
@@ -174,7 +176,7 @@ boolean Plugin_075(byte function, struct EventStruct *event, String& string)
       if (nullptr != P075_data) {
         P075_data->loadDisplayLines(event->TaskIndex);
         for (byte varNr = 0; varNr < P75_Nlines; varNr++) {
-          addFormTextBox(String(F("Line ")) + (varNr + 1), String(F("p075_template")) + (varNr + 1), P075_data->displayLines[varNr], P75_Nchars-1);
+          addFormTextBox(String(F("Line ")) + (varNr + 1), getPluginCustomArgName(varNr), P075_data->displayLines[varNr], P75_Nchars-1);
         }
       }
       if( Settings.TaskDeviceTimer[event->TaskIndex]==0) { // Is interval timer disabled?
@@ -202,9 +204,7 @@ boolean Plugin_075(byte function, struct EventStruct *event, String& string)
         String error;
         for (byte varNr = 0; varNr < P75_Nlines; varNr++)
         {
-          String argName = F("p075_template");
-          argName += varNr + 1;
-          if (!safe_strncpy(deviceTemplate[varNr], WebServer.arg(argName), P75_Nchars)) {
+          if (!safe_strncpy(deviceTemplate[varNr], WebServer.arg(getPluginCustomArgName(varNr)), P75_Nchars)) {
             error += getCustomTaskSettingsError(varNr);
           }
         }
@@ -336,7 +336,7 @@ boolean Plugin_075(byte function, struct EventStruct *event, String& string)
 // Nextion commands received from events (including http) get processed here. PLUGIN_WRITE
 // does NOT process publish commands that are sent.
     case PLUGIN_WRITE: {
-
+        // FIXME TD-er: This one is not using parseString* function
         String tmpString = string;
         int argIndex = tmpString.indexOf(',');
         if (argIndex) tmpString = tmpString.substring(0, argIndex);
@@ -540,7 +540,7 @@ boolean Plugin_075(byte function, struct EventStruct *event, String& string)
 }
 
 
-void P075_sendCommand(byte taskIndex, const char *cmd)
+void P075_sendCommand(taskIndex_t taskIndex, const char *cmd)
 {
   P075_data_struct* P075_data = static_cast<P075_data_struct*>(getPluginTaskData(taskIndex));
   if (!P075_data) return;
